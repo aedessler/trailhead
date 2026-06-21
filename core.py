@@ -14,6 +14,7 @@ pipeline from a plain terminal without launching the web UI. See the
 
 import glob
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -72,15 +73,53 @@ MAX_CHARS_FOR_SUMMARY = 12000
 # 1. Fetching web pages
 # ---------------------------------------------------------------------------
 
-# A normal browser User-Agent. Some sites return junk or block the default
-# python-requests agent, so we present ourselves like a regular browser.
+# A realistic browser header set. Some sites return junk or block requests that
+# only send a python-requests (or bare User-Agent) signature, so we mimic the
+# full set of headers a real Chrome browser sends. This won't defeat JavaScript
+# challenges (Cloudflare et al.), but it gets past naive bot filters that only
+# sniff for missing headers.
 _BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8,"
+        "application/signed-exchange;v=b3;q=0.7"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
+
+
+# Google Drive "view" links (…/file/d/<ID>/view) serve a JavaScript shell, not
+# the file itself, so fetching them yields no readable text. Match the file ID so
+# we can rewrite them to a direct-download URL that returns the actual bytes.
+_DRIVE_FILE_RE = re.compile(r"drive\.google\.com/file/d/([^/]+)")
+_DRIVE_OPEN_RE = re.compile(r"drive\.google\.com/open\?id=([^&]+)")
+
+
+def _normalize_url(url: str) -> str:
+    """Rewrite known wrapper URLs to a fetchable direct-download form.
+
+    Currently handles Google Drive share links, turning the JavaScript "view"
+    page into the direct-download endpoint so the normal (PDF) fetch path works.
+    Other URLs pass through unchanged.
+    """
+    match = _DRIVE_FILE_RE.search(url) or _DRIVE_OPEN_RE.search(url)
+    if match:
+        return f"https://drive.google.com/uc?export=download&id={match.group(1)}"
+    return url
 
 
 def fetch_page(url: str) -> tuple[str, str]:
@@ -90,8 +129,23 @@ def fetch_page(url: str) -> tuple[str, str]:
     sees the actual article content. Raises a ValueError if no usable text was
     found (e.g. a page rendered entirely by JavaScript).
     """
+    url = _normalize_url(url)
     response = requests.get(url, headers=_BROWSER_HEADERS, timeout=30)
     response.raise_for_status()
+
+    # PDFs aren't HTML — trafilatura can't read them. Detect a PDF by the
+    # server's Content-Type, the URL path ending in .pdf, or the file's magic
+    # bytes (%PDF) — the last catches downloads served as octet-stream, e.g.
+    # Google Drive. Then extract its text layer so the rest of the pipeline works.
+    content_type = response.headers.get("Content-Type", "").lower()
+    path = url.split("?", 1)[0].lower()
+    if (
+        "application/pdf" in content_type
+        or path.endswith(".pdf")
+        or response.content[:5] == b"%PDF-"
+    ):
+        return _extract_pdf(response.content, url)
+
     html = response.text
 
     # Extract the main readable text.
@@ -109,6 +163,35 @@ def fetch_page(url: str) -> tuple[str, str]:
             "JavaScript to render its content."
         )
 
+    return title, text.strip()
+
+
+def _extract_pdf(data: bytes, url: str) -> tuple[str, str]:
+    """Extract (title, text) from raw PDF bytes.
+
+    Reads the PDF's text layer page by page. Raises ValueError if there's no
+    extractable text (e.g. a scanned, image-only PDF), so callers fall back to
+    manual entry just as they do for JavaScript-only pages.
+    """
+    # Imported here (not at top) so the parser only loads when a PDF is actually
+    # fetched, matching the lazy-import style used for sentence-transformers.
+    import io
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+    text = "\n".join((page.extract_text() or "") for page in reader.pages)
+
+    # PDF metadata sometimes carries a title; fall back to the URL otherwise.
+    title = url
+    meta = reader.metadata
+    if meta and meta.title and meta.title.strip():
+        title = meta.title.strip()
+
+    if not text.strip():
+        raise ValueError(
+            "This PDF has no extractable text — it may be a scanned image. "
+            "You can paste the text or enter a summary yourself below."
+        )
     return title, text.strip()
 
 

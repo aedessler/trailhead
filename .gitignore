@@ -7,6 +7,7 @@ __pycache__/
 
 # Personal scratch / not part of the app
 tamu_ai_test.py
+HEADLESS_BROWSER_PLAN.md
 
 # macOS
 .DS_Store

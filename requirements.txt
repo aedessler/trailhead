@@ -1,6 +1,8 @@
 streamlit
 requests
+brotli
 trafilatura
+pypdf
 openai
 sentence-transformers
 numpy

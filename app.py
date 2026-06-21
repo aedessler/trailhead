@@ -93,10 +93,21 @@ with entry_tab:
             except Exception as exc:
                 # Don't dead-end: fall back to manual entry so the user can still
                 # save the link with their own summary/notes (or paste page text).
+                # A 403/401/429 means the site is actively blocking automated
+                # access (common for academic publishers behind Cloudflare) — that
+                # needs manual entry, not a JS-render retry, so say so plainly.
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status in (401, 403, 429):
+                    reason = (
+                        "this site blocks automated access, so it can't be fetched "
+                        "here"
+                    )
+                else:
+                    reason = "it may need JavaScript to load"
                 st.warning(
-                    f"Couldn't automatically read this page ({exc}) — it may need "
-                    "JavaScript to load. You can enter the details yourself below, "
-                    "or paste the page's text and have it summarized."
+                    f"Couldn't automatically read this page ({exc}) — {reason}. "
+                    "You can enter the details yourself below, or paste the page's "
+                    "text and have it summarized."
                 )
                 st.session_state["pending"] = {
                     "url": url.strip(),

@@ -18,7 +18,12 @@ The app has three tabs:
 ### ➕ Add a link
 1. Paste a URL and click **Fetch & Summarize** (or just press **Enter**).
 2. The app downloads the page, extracts the readable article text, and asks the
-   LLM for a short summary.
+   LLM for a short summary. **PDF links work too** — the app pulls the text
+   straight out of the PDF and summarizes it like any other page. **Google Drive
+   share links** work as well: a `…/file/d/<ID>/view` link is automatically
+   rewritten to fetch the underlying file (the file must be shared with "anyone
+   with the link"; very large files that trigger Drive's virus-scan page can't be
+   read automatically).
 3. It also suggests a handful of **keywords** for the page (shown as clickable
    chips — click any to add it to the Keywords box).
 4. Review/edit the **Title**, **Summary**, **Keywords**, and optional **Notes**,
@@ -29,11 +34,13 @@ If you enter a URL that's **already in your library**, the app skips fetching an
 opens an inline editor for the existing entry (pre-filled), so you update it
 instead of creating a duplicate.
 
-If a page can't be read automatically (some sites render entirely with
-JavaScript, and PDFs aren't fetched), the app doesn't dead-end. You can **type
-your own summary**, or **paste the page's text** and click *Summarize pasted
-text* (or press **⌘+Enter** in the box) — the LLM then fills in the title,
-summary, and suggested keywords for you.
+If a page can't be read automatically — some sites render entirely with
+JavaScript, scanned/image-only PDFs have no text to pull, and many academic
+publishers (e.g. World Scientific, ScienceDirect, Springer) **block automated
+access** behind anti-bot protection — the app doesn't dead-end. The warning tells
+you which case it is. You can **type your own summary**, or **paste the page's text** and
+click *Summarize pasted text* (or press **⌘+Enter** in the box) — the LLM then
+fills in the title, summary, and suggested keywords for you.
 
 ### 🔎 Search
 - Type a topic (or paste a URL) and press **Enter** or click **Search**.
@@ -153,10 +160,14 @@ and drag it to your Dock.
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |
 | `run.command` | The double-click launcher. |
 
-Under the hood: pages are fetched with `requests` and cleaned with
-`trafilatura`; summaries/keywords use the OpenAI-compatible chat API; semantic
-search uses `sentence-transformers` (`all-MiniLM-L6-v2`) with cosine similarity
-computed in `numpy`.
+Under the hood: pages are fetched with `requests` (sending a full browser-like
+header set to get past naive bot filters; Google Drive share links are rewritten
+to their direct-download form first) and cleaned with `trafilatura` (PDFs are
+detected — by content type, extension, or `%PDF` magic bytes — and their text
+pulled with `pypdf`);
+summaries/keywords use the OpenAI-compatible chat API; semantic search uses
+`sentence-transformers` (`all-MiniLM-L6-v2`) with cosine similarity computed in
+`numpy`.
 
 ---
 
@@ -165,9 +176,13 @@ computed in `numpy`.
 - **"Incorrect API key" / 401 error when summarizing.** The key is invalid or
   expired. Regenerate it at your provider, paste the new value into `.env`, and
   **restart the app**. Remember `.env` overrides any key exported in your shell.
-- **"Couldn't automatically read this page."** The page is JavaScript-only or a
-  PDF. Use the manual fallback: paste the text and click *Summarize pasted text*,
-  or write your own summary/notes.
+- **"Couldn't automatically read this page."** Either the site **blocks
+  automated access** (a 403/401/429 — common with academic publishers behind
+  Cloudflare, like World Scientific or ScienceDirect), the page is JavaScript-only,
+  or it's a scanned/image-only PDF with no text layer. The warning says which.
+  Header-spoofing alone can't get past publisher bot protection, so use the manual
+  fallback: paste the text and click *Summarize pasted text*, or write your own
+  summary/notes.
 - **A code change didn't show up.** The app doesn't auto-reload (the file watcher
   is off to keep the terminal quiet). Quit and relaunch `run.command`.
 - **Edited the API key/model but nothing changed.** Those are read at startup —
