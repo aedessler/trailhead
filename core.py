@@ -161,6 +161,33 @@ def summarize(text: str, model: str | None = None) -> str:
     return response.choices[0].message.content.strip()
 
 
+def suggest_title(text: str, model: str | None = None) -> str:
+    """Ask the LLM for a short, descriptive title for the given text.
+
+    Useful when there's no page title to extract (e.g. text pasted from a PDF).
+    """
+    client = _get_llm_client()
+    if model is None:
+        _, model, _ = _provider_config()
+
+    response = client.chat.completions.create(
+        model=model,
+        stream=False,  # TAMU streams Claude models unless explicitly told not to
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You write concise, descriptive titles. Reply with ONLY a "
+                    "title (no quotes, no surrounding text, under 12 words) for "
+                    "the content the user provides."
+                ),
+            },
+            {"role": "user", "content": text[:4000]},
+        ],
+    )
+    return response.choices[0].message.content.strip().strip('"')
+
+
 def suggest_keywords(summary: str, n: int = 6, model: str | None = None) -> list[str]:
     """Ask the LLM for a few short topical keywords describing the content.
 
@@ -359,6 +386,17 @@ def update_entry(
             """,
             (title, summary, notes, keywords, vector.tobytes(), entry_id),
         )
+
+
+def get_entry_by_url(url: str) -> dict | None:
+    """Return the saved entry with this exact URL, or None if it isn't saved."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "FROM entries WHERE url = ?",
+            (url,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def delete_entry(entry_id: int) -> None:

@@ -6,8 +6,8 @@ and you **search** your library later by meaning (not just exact words) to
 rediscover what you saved — each summary a trailhead back into a source you
 explored.
 
-No Xcode, no Swift — it's Python with a browser-based UI (Streamlit) that you
-launch from a double-click icon.
+It's written in Python with a browser-based UI (Streamlit) that you launch from 
+a double-click icon.
 
 ---
 
@@ -25,9 +25,15 @@ The app has three tabs:
    then click **💾 Save to library**. The form clears automatically so you can
    add the next link without reloading.
 
+If you enter a URL that's **already in your library**, the app skips fetching and
+opens an inline editor for the existing entry (pre-filled), so you update it
+instead of creating a duplicate.
+
 If a page can't be read automatically (some sites render entirely with
-JavaScript), the app doesn't dead-end: it lets you **type your own summary**, or
-**paste the page's text** and have the LLM summarize that instead.
+JavaScript, and PDFs aren't fetched), the app doesn't dead-end. You can **type
+your own summary**, or **paste the page's text** and click *Summarize pasted
+text* (or press **⌘+Enter** in the box) — the LLM then fills in the title,
+summary, and suggested keywords for you.
 
 ### 🔎 Search
 - Type a topic (or paste a URL) and press **Enter** or click **Search**.
@@ -46,14 +52,22 @@ JavaScript), the app doesn't dead-end: it lets you **type your own summary**, or
 
 ## Choosing your LLM provider
 
-Summaries and keyword suggestions can come from **OpenAI** (default) or the
-**TAMU AI** platform. Switch by editing one line near the top of `core.py`:
+Summaries, titles, and keyword suggestions can come from the **TAMU AI** platform
+(current default) or **OpenAI**. Switch by editing one line near the top of
+`core.py`:
 
 ```python
-LLM_PROVIDER = "openai"   # or "tamu"
+LLM_PROVIDER = "tamu"   # or "openai"
 ```
 
-Both providers' code stays in place — you only flip this switch and supply the
+You can also change which model each provider uses, e.g.:
+
+```python
+TAMU_MODEL = "protected.Claude Sonnet 4.6"   # e.g. protected.gpt-4o, protected.Claude Opus 4.7
+OPENAI_MODEL = "gpt-4o"
+```
+
+Both providers' code stays in place — you only flip the switch and supply the
 matching key (below). Search and embeddings always run **locally** on your Mac
 and are free, offline, and unaffected by this switch.
 
@@ -62,8 +76,8 @@ and are free, offline, and unaffected by this switch.
 ## One-time setup
 
 1. **Get an API key for your chosen provider:**
-   - OpenAI (default): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-   - TAMU: [chat.tamu.ai](https://chat.tamu.ai) → Settings → API Key
+   - TAMU (current default): [chat.tamu.ai](https://chat.tamu.ai) → Settings → API Key
+   - OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. **Add the key:** copy `.env.example` to `.env`:
    ```
    cp ".env.example" ".env"
@@ -87,6 +101,9 @@ Double-click **`run.command`** in Finder.
   environment lives in a `.venv` folder and does not affect your system Python.
 - Every launch after that is fast.
 - The app opens in your default web browser. Closing the Terminal window quits it.
+- It runs on a fixed port (8501) and **won't start a second copy** — if Trailhead
+  is already running, launching again just reopens it in your browser instead of
+  spawning another window/process.
 
 > If macOS blocks `run.command` ("unidentified developer"), right-click it →
 > **Open** the first time, or run `chmod +x run.command` in Terminal.
@@ -100,8 +117,9 @@ and drag it to your Dock.
 
 ## Costs & performance
 
-- Each **summary** and the **keyword suggestions** are LLM calls (a fraction of a
-  cent each with OpenAI's `gpt-4o`). A funded API account is required.
+- Each **summary**, generated **title** (for pasted text), and **keyword
+  suggestion** is an LLM call. With OpenAI these cost a small amount per call (a
+  funded account is required); TAMU AI is free for eligible university users.
 - **Search is free** — it runs the local embedding model, no API calls.
 - The **first** summary/search of a session takes a few extra seconds while the
   embedding model loads into memory; everything after that is fast.
@@ -127,7 +145,7 @@ and drag it to your Dock.
 | File | Role |
 |---|---|
 | `app.py` | The UI: the Add / Search / Browse tabs. Presentation only. |
-| `core.py` | The engine: fetch page, summarize, suggest keywords, embed, store/search/edit, back up. |
+| `core.py` | The engine: fetch page, summarize, suggest title & keywords, embed, store/search/edit, back up. |
 | `library.db` | Your saved links (SQLite, created automatically). |
 | `backups/` | Timestamped database snapshots (created automatically). |
 | `requirements.txt` | The Python packages. |
@@ -139,6 +157,24 @@ Under the hood: pages are fetched with `requests` and cleaned with
 `trafilatura`; summaries/keywords use the OpenAI-compatible chat API; semantic
 search uses `sentence-transformers` (`all-MiniLM-L6-v2`) with cosine similarity
 computed in `numpy`.
+
+---
+
+## Troubleshooting
+
+- **"Incorrect API key" / 401 error when summarizing.** The key is invalid or
+  expired. Regenerate it at your provider, paste the new value into `.env`, and
+  **restart the app**. Remember `.env` overrides any key exported in your shell.
+- **"Couldn't automatically read this page."** The page is JavaScript-only or a
+  PDF. Use the manual fallback: paste the text and click *Summarize pasted text*,
+  or write your own summary/notes.
+- **A code change didn't show up.** The app doesn't auto-reload (the file watcher
+  is off to keep the terminal quiet). Quit and relaunch `run.command`.
+- **Edited the API key/model but nothing changed.** Those are read at startup —
+  restart the app after editing `.env` or `core.py`.
+- **TAMU + a Claude model returns odd/empty output.** Claude models on TAMU
+  stream by default; the app already requests non-streaming, so make sure you're
+  on the current `core.py`.
 
 ---
 

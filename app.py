@@ -28,8 +28,8 @@ def _startup_backup():
 
 _last_backup_path = _startup_backup()
 
-st.set_page_config(page_title="Link Library", page_icon="🔖", layout="centered")
-st.title("🔖 Link Library")
+st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
+st.title("🧭 Trailhead")
 
 entry_tab, search_tab, browse_tab = st.tabs(["➕ Add a link", "🔎 Search", "📚 Browse all"])
 
@@ -43,18 +43,32 @@ with entry_tab:
 
     # Show a one-time confirmation after a save cleared the form.
     if st.session_state.pop("just_saved", False):
-        st.success("Saved! The form is cleared — ready for your next link.")
+        st.success("Saved!")
 
-    # A form so that pressing Enter in the URL box is the same as clicking the
-    # button (Streamlit submits a form when you press Enter in one of its fields).
-    with st.form("fetch_form"):
-        url = st.text_input("Paste a URL", key="entry_url", placeholder="https://...")
+    # The URL box lives in a form so pressing Enter triggers Fetch & Summarize.
+    # Text inputs inside a form can't be reliably cleared by deleting their
+    # session_state key, so we bump this counter after each save to give the form
+    # a fresh key — which resets the box to empty.
+    round_n = st.session_state.get("entry_round", 0)
+    with st.form(f"fetch_form_{round_n}"):
+        url = st.text_input(
+            "Paste a URL", key=f"entry_url_{round_n}", placeholder="https://..."
+        )
         fetch_clicked = st.form_submit_button("Fetch & Summarize", type="primary")
 
     if fetch_clicked:
         if not url.strip():
             st.warning("Please paste a URL first.")
+        elif core.get_entry_by_url(url.strip()):
+            # Already saved — open it for editing instead of fetching a duplicate.
+            st.session_state["edit_existing"] = core.get_entry_by_url(url.strip())
+            st.session_state.pop("pending", None)
+            st.session_state["pending_round"] = (
+                st.session_state.get("pending_round", 0) + 1
+            )
+            st.rerun()
         else:
+            st.session_state.pop("edit_existing", None)
             try:
                 with st.spinner("Fetching page..."):
                     title, text = core.fetch_page(url.strip())
@@ -73,6 +87,9 @@ with entry_tab:
                     "manual": False,
                     "suggested_keywords": suggested,
                 }
+                st.session_state["pending_round"] = (
+                    st.session_state.get("pending_round", 0) + 1
+                )
             except Exception as exc:
                 # Don't dead-end: fall back to manual entry so the user can still
                 # save the link with their own summary/notes (or paste page text).
@@ -87,42 +104,106 @@ with entry_tab:
                     "summary": "",
                     "manual": True,
                 }
+                st.session_state["pending_round"] = (
+                    st.session_state.get("pending_round", 0) + 1
+                )
+
+    # If the entered URL is already saved, show an inline editor for that entry
+    # instead of creating a duplicate.
+    edit_existing = st.session_state.get("edit_existing")
+    if edit_existing:
+        st.divider()
+        st.info("This link is already in your library — editing the existing entry.")
+        epr = st.session_state.get("pending_round", 0)
+        e_title = st.text_input(
+            "Title", value=edit_existing["title"], key=f"dup_title_{epr}"
+        )
+        e_summary = st.text_area(
+            "Summary", value=edit_existing["summary"], key=f"dup_summary_{epr}", height=160
+        )
+        e_keywords = st.text_input(
+            "Keywords (comma-separated)",
+            value=edit_existing["keywords"],
+            key=f"dup_kw_{epr}",
+        )
+        e_notes = st.text_area(
+            "Notes", value=edit_existing["notes"], key=f"dup_notes_{epr}", height=80
+        )
+        save_col, cancel_col = st.columns(2)
+        if save_col.button("💾 Save changes", type="primary", key="dup_save"):
+            with st.spinner("Saving..."):
+                core.update_entry(
+                    edit_existing["id"], e_title, e_summary, e_notes, e_keywords
+                )
+            st.session_state.pop("edit_existing", None)
+            st.session_state["entry_round"] = (
+                st.session_state.get("entry_round", 0) + 1
+            )
+            st.session_state["just_saved"] = True
+            st.rerun()
+        if cancel_col.button("Cancel", key="dup_cancel"):
+            st.session_state.pop("edit_existing", None)
+            st.session_state["entry_round"] = (
+                st.session_state.get("entry_round", 0) + 1
+            )
+            st.rerun()
 
     # If we have a fetched-and-summarized page waiting, show the editable form.
     pending = st.session_state.get("pending")
     if pending:
         st.divider()
+        pr = st.session_state.get("pending_round", 0)
 
         # If automatic reading failed, offer to summarize text the user pastes in.
+        # The box + button live in a form so Cmd+Enter in the box also submits.
         if pending.get("manual"):
             with st.expander("📋 Paste the page's text to summarize it (optional)"):
-                pasted = st.text_area("Paste page text here", key="paste_text", height=160)
-                if st.button("Summarize pasted text"):
-                    if pasted.strip():
-                        with st.spinner("Summarizing..."):
-                            pending["summary"] = core.summarize(pasted.strip())
-                        with st.spinner("Suggesting keywords..."):
+                with st.form(f"paste_form_{pr}"):
+                    pasted = st.text_area(
+                        "Paste page text here", key=f"paste_text_{pr}", height=160
+                    )
+                    paste_submitted = st.form_submit_button("Summarize pasted text")
+                if paste_submitted:
+                    if not pasted.strip():
+                        st.warning("Paste some text first.")
+                    else:
+                        ok = False
+                        try:
+                            with st.spinner("Summarizing..."):
+                                pending["summary"] = core.summarize(pasted.strip())
+                                pending["title"] = core.suggest_title(pasted.strip())
                             try:
-                                pending["suggested_keywords"] = core.suggest_keywords(
-                                    pending["summary"]
-                                )
+                                with st.spinner("Suggesting keywords..."):
+                                    pending["suggested_keywords"] = core.suggest_keywords(
+                                        pending["summary"]
+                                    )
                             except Exception:
                                 pending["suggested_keywords"] = []
-                        st.session_state["pending"] = pending
-                        # Drop the box's stored value so it reloads with the new summary.
-                        st.session_state.pop("save_summary", None)
-                        st.rerun()
-                    else:
-                        st.warning("Paste some text first.")
+                            ok = True
+                        except Exception as exc:
+                            st.error(f"Couldn't summarize the pasted text: {exc}")
+                        # Rerun OUTSIDE the try (st.rerun raises internally, which a
+                        # broad except would otherwise swallow). Drop the stored box
+                        # values so Title and Summary reload with the new content.
+                        if ok:
+                            st.session_state["pending"] = pending
+                            # New round → Title/Summary boxes re-init from pending.
+                            st.session_state["pending_round"] = (
+                                st.session_state.get("pending_round", 0) + 1
+                            )
+                            st.rerun()
             st.caption("Or just write your own summary/notes below.")
         else:
             st.caption("Review and edit before saving:")
 
-        st.text_input("Title", value=pending["title"], key="save_title")
+        # Editable fields use a changing key (pending_round) so they reliably
+        # re-initialize from the latest pending content — the same trick used for
+        # the URL box. (Popping a static key + value= is unreliable in Streamlit.)
+        st.text_input("Title", value=pending["title"], key=f"save_title_{pr}")
         st.text_area(
             "Summary (you can edit this)",
             value=pending["summary"],
-            key="save_summary",
+            key=f"save_summary_{pr}",
             height=160,
         )
         # Quick-add chips. Prefer the LLM's per-page suggestions; fall back to the
@@ -136,26 +217,26 @@ with entry_tab:
             st.caption("Quick add keywords:")
         chip_cols = st.columns(len(chips))
         for col, word in zip(chip_cols, chips):
-            if col.button(word, key=f"chip_{word}"):
-                current = st.session_state.get("save_keywords", "")
+            if col.button(word, key=f"chip_{pr}_{word}"):
+                current = st.session_state.get(f"save_kw_{pr}", "")
                 parts = [p.strip() for p in current.split(",") if p.strip()]
                 if word not in parts:
                     parts.append(word)
-                st.session_state["save_keywords"] = ", ".join(parts)
+                st.session_state[f"save_kw_{pr}"] = ", ".join(parts)
 
         st.text_input(
             "Keywords (comma-separated, optional)",
-            key="save_keywords",
+            key=f"save_kw_{pr}",
             placeholder="type your own, or use the buttons above",
         )
-        st.text_area("Notes (optional)", key="save_notes", height=80)
+        st.text_area("Notes (optional)", key=f"save_notes_{pr}", height=80)
 
         if st.button("💾 Save to library", type="primary"):
             # Need at least a summary or some notes — otherwise there's nothing
             # meaningful to embed for search.
             has_text = (
-                st.session_state.get("save_summary", "").strip()
-                or st.session_state.get("save_notes", "").strip()
+                st.session_state.get(f"save_summary_{pr}", "").strip()
+                or st.session_state.get(f"save_notes_{pr}", "").strip()
             )
             if not has_text:
                 st.warning("Please add a summary or some notes before saving.")
@@ -163,18 +244,23 @@ with entry_tab:
                 with st.spinner("Saving... (preparing the summary for search)"):
                     core.add_entry(
                         url=pending["url"],
-                        title=st.session_state["save_title"],
-                        summary=st.session_state["save_summary"],
-                        notes=st.session_state.get("save_notes", ""),
-                        keywords=st.session_state.get("save_keywords", ""),
+                        title=st.session_state.get(f"save_title_{pr}", ""),
+                        summary=st.session_state.get(f"save_summary_{pr}", ""),
+                        notes=st.session_state.get(f"save_notes_{pr}", ""),
+                        keywords=st.session_state.get(f"save_kw_{pr}", ""),
                     )
                 # Clear everything (including the URL box) and rerun so the form
                 # is blank and ready for the next link without a page reload.
                 for k in (
-                    "pending", "save_title", "save_summary", "save_keywords",
-                    "save_notes", "paste_text", "entry_url",
+                    "pending", f"paste_text_{pr}",
+                    f"save_title_{pr}", f"save_summary_{pr}",
+                    f"save_kw_{pr}", f"save_notes_{pr}",
                 ):
                     st.session_state.pop(k, None)
+                # Bump the form key so the URL box comes back empty next run.
+                st.session_state["entry_round"] = (
+                    st.session_state.get("entry_round", 0) + 1
+                )
                 st.session_state["just_saved"] = True
                 st.rerun()
 
