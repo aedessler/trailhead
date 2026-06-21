@@ -1,0 +1,12 @@
+.venv/
+.env
+library.db
+backups/
+__pycache__/
+*.pyc
+
+# Personal scratch / not part of the app
+tamu_ai_test.py
+
+# macOS
+.DS_Store

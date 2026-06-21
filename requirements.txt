@@ -1,0 +1,7 @@
+streamlit
+requests
+trafilatura
+openai
+sentence-transformers
+numpy
+python-dotenv
