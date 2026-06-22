@@ -165,44 +165,49 @@ with entry_tab:
         st.divider()
         pr = st.session_state.get("pending_round", 0)
 
-        # If automatic reading failed, offer to summarize text the user pastes in.
-        # The box + button live in a form so Cmd+Enter in the box also submits.
-        if pending.get("manual"):
-            with st.expander("📋 Paste the page's text to summarize it (optional)"):
-                with st.form(f"paste_form_{pr}"):
-                    pasted = st.text_area(
-                        "Paste page text here", key=f"paste_text_{pr}", height=160
-                    )
-                    paste_submitted = st.form_submit_button("Summarize pasted text")
-                if paste_submitted:
-                    if not pasted.strip():
-                        st.warning("Paste some text first.")
-                    else:
-                        ok = False
+        # After any fetch attempt, offer to (re)summarize text the user pastes in.
+        # The automatic fetch can fail outright (manual=True), or "succeed" on a
+        # bot-verification page (HTTP 200 with junk) — in both cases pasting the real
+        # page text and re-summarizing fixes it. The original URL stays attached via
+        # `pending`. The box + button live in a form so Cmd+Enter also submits.
+        with st.expander(
+            "📝 Page blocked or summary looks wrong? Paste the page's text to summarize"
+        ):
+            with st.form(f"paste_form_{pr}"):
+                pasted = st.text_area(
+                    "Paste page text here", key=f"paste_text_{pr}", height=200
+                )
+                paste_submitted = st.form_submit_button("Summarize pasted text")
+            if paste_submitted:
+                if not pasted.strip():
+                    st.warning("Paste some text first.")
+                else:
+                    ok = False
+                    try:
+                        with st.spinner("Summarizing..."):
+                            pending["summary"] = core.summarize(pasted.strip())
+                            pending["title"] = core.suggest_title(pasted.strip())
                         try:
-                            with st.spinner("Summarizing..."):
-                                pending["summary"] = core.summarize(pasted.strip())
-                                pending["title"] = core.suggest_title(pasted.strip())
-                            try:
-                                with st.spinner("Suggesting keywords..."):
-                                    pending["suggested_keywords"] = core.suggest_keywords(
-                                        pending["summary"]
-                                    )
-                            except Exception:
-                                pending["suggested_keywords"] = []
-                            ok = True
-                        except Exception as exc:
-                            st.error(f"Couldn't summarize the pasted text: {exc}")
-                        # Rerun OUTSIDE the try (st.rerun raises internally, which a
-                        # broad except would otherwise swallow). Drop the stored box
-                        # values so Title and Summary reload with the new content.
-                        if ok:
-                            st.session_state["pending"] = pending
-                            # New round → Title/Summary boxes re-init from pending.
-                            st.session_state["pending_round"] = (
-                                st.session_state.get("pending_round", 0) + 1
-                            )
-                            st.rerun()
+                            with st.spinner("Suggesting keywords..."):
+                                pending["suggested_keywords"] = core.suggest_keywords(
+                                    pending["summary"]
+                                )
+                        except Exception:
+                            pending["suggested_keywords"] = []
+                        ok = True
+                    except Exception as exc:
+                        st.error(f"Couldn't summarize the pasted text: {exc}")
+                    # Rerun OUTSIDE the try (st.rerun raises internally, which a broad
+                    # except would otherwise swallow). New round → Title/Summary boxes
+                    # re-init from the updated pending content.
+                    if ok:
+                        st.session_state["pending"] = pending
+                        st.session_state["pending_round"] = (
+                            st.session_state.get("pending_round", 0) + 1
+                        )
+                        st.rerun()
+
+        if pending.get("manual"):
             st.caption("Or just write your own summary/notes below.")
         else:
             st.caption("Review and edit before saving:")
