@@ -145,6 +145,90 @@ and drag it to your Dock.
 
 ---
 
+## Running on Windows
+
+The app itself is plain, cross-platform Python — `app.py` and `core.py` run on
+Windows unchanged. The only Mac-specific piece is the `run.command` launcher.
+To run Trailhead on Windows you need two things: **Python installed**, and a
+**`run.bat`** launcher in place of `run.command`.
+
+**1. Install Python.** Windows doesn't ship with Python. Install Python 3.x from
+[python.org/downloads](https://www.python.org/downloads/) and — important — tick
+**"Add python.exe to PATH"** on the first screen of the installer.
+
+**2. Add the API key** exactly as in [One-time setup](#one-time-setup): copy
+`.env.example` to `.env` and paste your real key. (`python-dotenv` reads `.env`
+the same way on every OS.) In a Command Prompt that's `copy ".env.example" ".env"`.
+
+**3. Create `run.bat`** in this folder (next to `app.py`) with the following
+contents. It's the Windows twin of `run.command`: it builds a private Python
+environment on first launch, self-repairs it if a package is missing, then
+starts the app.
+
+```bat
+@echo off
+REM Double-click this file to launch the Trailhead app on Windows.
+REM On the FIRST run it creates a private Python environment and installs the
+REM needed packages (a few minutes). After that, launches are fast.
+
+REM Move into the folder this script lives in, regardless of where it's run from.
+cd /d "%~dp0"
+
+REM The virtual environment lives OUTSIDE this folder, in %USERPROFILE%\.venvs,
+REM on purpose. If this project sits under a OneDrive-synced Documents folder,
+REM OneDrive can't keep up with the thousands of tiny files in a Python
+REM environment and will half-sync them, silently breaking it. Keeping the venv
+REM in a non-synced location (which OneDrive doesn't touch) avoids that.
+set "VENV_DIR=%USERPROFILE%\.venvs\trailhead"
+
+REM Create the environment the first time only.
+if not exist "%VENV_DIR%" (
+    echo First-time setup: creating Python environment...
+    python -m venv "%VENV_DIR%"
+)
+call "%VENV_DIR%\Scripts\activate.bat"
+
+REM Verify the environment is intact before launching. If the key package can't
+REM be imported, (re)install everything so a broken environment self-repairs.
+python -c "import streamlit" >nul 2>&1
+if errorlevel 1 (
+    echo Installing packages (this can take a few minutes)...
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+)
+
+REM Quiet down the embedding library's noisy (harmless) startup messages.
+set TRANSFORMERS_VERBOSITY=error
+set TRANSFORMERS_NO_ADVISORY_WARNINGS=1
+set HF_HUB_DISABLE_PROGRESS_BARS=1
+set TOKENIZERS_PARALLELISM=false
+
+REM Launch the app. Streamlit opens it in your default web browser.
+echo Starting the app... (close this window to quit)
+streamlit run app.py --server.port 8501
+```
+
+**4. Launch** by double-clicking `run.bat` (or running it from a Command Prompt).
+The first launch installs everything (a few minutes, including the one-time
+~80 MB embedding model); later launches are fast. The app opens in your default
+browser, and closing the Command Prompt window quits it.
+
+> **Notes & differences from the Mac launcher:**
+> - **`python` vs `python3`:** Windows uses `python`. If that's not found, use
+>   the `py` launcher (`py -m venv ...`) or re-run the installer with "Add to
+>   PATH" checked.
+> - **The venv path is `%USERPROFILE%\.venvs\trailhead`** — the same
+>   outside-the-synced-folder idea as on Mac (see above), just guarding against
+>   **OneDrive** instead of iCloud. For a clean rebuild, delete that folder and
+>   relaunch.
+> - **No duplicate-launch guard.** The Mac script uses `lsof` to avoid starting a
+>   second copy; the reliable Windows equivalent is fiddly, so it's omitted. Just
+>   don't double-launch — if you do, close the extra window.
+> - **`sentence-transformers`/`torch` install fine on Windows** (CPU wheels via
+>   pip) — no extra steps, just a larger first-time download.
+
+---
+
 ## Costs & performance
 
 - Each **summary**, generated **title** (for pasted text), and **keyword
