@@ -289,7 +289,7 @@ with search_tab:
         query = st.text_input("Search", key="search_query", placeholder="e.g. satellite climate data")
         search_clicked = st.form_submit_button("Search", type="primary")
 
-    top_k = st.slider("How many results?", min_value=1, max_value=25, value=10)
+    top_k = st.slider("How many results?", min_value=1, max_value=25, value=5)
 
     if search_clicked:
         if not query.strip():

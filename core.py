@@ -235,7 +235,11 @@ def summarize(text: str, model: str | None = None) -> str:
                     "You are a concise summarizer. Summarize the web page the "
                     "user provides in 3-5 sentences. Focus on the main topics, "
                     "themes, and takeaways so the summary is useful for later "
-                    "semantic search. Do not add preamble like 'This page'."
+                    "semantic search. Do not add preamble like 'This page'. "
+                    "After the summary, identify the author(s) of the content "
+                    "and add a final line in exactly this format: "
+                    "'Authors: <comma-separated names>'. If no author can be "
+                    "determined from the text, write 'Authors: Unknown'."
                 ),
             },
             {"role": "user", "content": snippet},
@@ -487,7 +491,7 @@ def delete_entry(entry_id: int) -> None:
         conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
 
 
-def search(query: str, top_k: int = 10) -> list[dict]:
+def search(query: str, top_k: int = 5) -> list[dict]:
     """Find the entries most similar in meaning to `query`.
 
     `query` can be a topic phrase OR a URL. If it looks like a URL we fetch and
