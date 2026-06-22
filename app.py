@@ -315,6 +315,15 @@ with search_tab:
                     if r["keywords"]:
                         st.caption(f"Keywords: {r['keywords']}")
 
+                    related = core.related_entries(r["id"], top_k=5)
+                    if related:
+                        st.caption("🔗 Related links")
+                        for rel in related:
+                            st.markdown(
+                                f"- [{rel['title'] or rel['url']}]({rel['url']}) "
+                                f"· {rel['score']:.0%}"
+                            )
+
 
 # ---------------------------------------------------------------------------
 # Browse mode (handy for managing the library)
@@ -376,6 +385,15 @@ with browse_tab:
                     st.caption(f"Keywords: {e['keywords']}")
                 if e["notes"]:
                     st.caption(f"Notes: {e['notes']}")
+
+                related = core.related_entries(eid, top_k=5)
+                if related:
+                    st.caption("🔗 Related links")
+                    for rel in related:
+                        st.markdown(
+                            f"- [{rel['title'] or rel['url']}]({rel['url']}) "
+                            f"· {rel['score']:.0%}"
+                        )
 
                 edit_col, del_col = st.columns(2)
                 if edit_col.button("✏️ Edit", key=f"edit_{eid}"):

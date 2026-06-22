@@ -369,7 +369,7 @@ def init_db() -> None:
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 
 
-def backup_database(keep: int = 10) -> str | None:
+def backup_database(keep: int = 5) -> str | None:
     """Make a timestamped, consistent copy of the database in ./backups.
 
     Uses SQLite's online backup API so the copy is safe even if a write were in
@@ -489,6 +489,37 @@ def get_entry_by_url(url: str) -> dict | None:
 def delete_entry(entry_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+
+
+def related_entries(entry_id: int, top_k: int = 5) -> list[dict]:
+    """Entries most semantically similar to the given one (excluding itself).
+
+    Reuses the stored embeddings, so this is the same cosine-similarity math as
+    `search` but with an existing entry's vector as the query. Returns up to
+    `top_k` dicts with id, url, title and a 'score' (cosine similarity, 0-1).
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, url, title, embedding FROM entries"
+        ).fetchall()
+
+    target = next((r for r in rows if r["id"] == entry_id), None)
+    if target is None or len(rows) < 2:
+        return []
+
+    target_vec = np.frombuffer(target["embedding"], dtype=np.float32)
+    others = [r for r in rows if r["id"] != entry_id]
+    matrix = np.vstack(
+        [np.frombuffer(r["embedding"], dtype=np.float32) for r in others]
+    )
+    # Vectors are normalized, so the dot product IS the cosine similarity.
+    scores = matrix @ target_vec
+
+    ranked = sorted(zip(others, scores), key=lambda p: p[1], reverse=True)
+    return [
+        {"id": r["id"], "url": r["url"], "title": r["title"], "score": float(s)}
+        for r, s in ranked[:top_k]
+    ]
 
 
 def search(query: str, top_k: int = 5) -> list[dict]:
