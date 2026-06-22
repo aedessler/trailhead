@@ -577,6 +577,56 @@ def search(query: str, top_k: int = 5) -> list[dict]:
     return results[:top_k]
 
 
+def _term_regex(term: str) -> re.Pattern:
+    """Compile one search word into a case-insensitive substring regex.
+
+    Glob wildcards: * matches any run of characters, ? matches exactly one.
+    Every other character (including a literal % or _) is matched as plain text.
+    """
+    escaped = re.escape(term.lower())
+    pattern = escaped.replace(r"\*", ".*").replace(r"\?", ".")
+    return re.compile(pattern)
+
+
+def text_search(query: str) -> list[dict]:
+    """Find entries whose text matches every word in `query` (case-insensitive).
+
+    Unlike `search`, this does no embedding or semantic ranking — it's a plain
+    "find these words" lookup across every text field (url, title, summary,
+    notes, keywords). It returns *all* matches, newest first, so a name like
+    "Moore" surfaces wherever it appears, even if it isn't one of the keywords.
+
+    Multiple words are combined with an implicit AND: each word must appear
+    somewhere in the entry, but not next to each other or in any set order. So
+    "moore climate" finds entries that contain both "moore" and "climate"
+    anywhere in their text.
+
+    Each word may use glob wildcards:
+      *  matches any run of characters (including none) — e.g. "clim*"
+      ?  matches exactly one character                  — e.g. "wom?n"
+    """
+    terms = [_term_regex(word) for word in query.split()]
+    if not terms:
+        return []
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "FROM entries ORDER BY id DESC"
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        # One searchable blob per entry so a word can match in any field.
+        blob = " ".join(
+            (row[field] or "")
+            for field in ("url", "title", "summary", "notes", "keywords")
+        ).lower()
+        if all(rx.search(blob) for rx in terms):
+            results.append(dict(row))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Quick headless smoke test:  python core.py
 # ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@ Run it with:   streamlit run app.py
 All the real work lives in core.py; this file is only the screen layout.
 """
 
+import os
+
 import streamlit as st
 
 import core
@@ -14,6 +16,10 @@ import core
 # Quick-add keyword chips shown under the Keywords box. Edit this list to match
 # the tags you use most — clicking a chip adds that word to the Keywords field.
 SUGGESTED_KEYWORDS = ["climate", "satellites", "methods", "policy", "data", "modeling"]
+
+# The Help tab renders this Markdown file. It lives next to app.py so you can edit
+# the documentation without touching the code; changes show on the next rerun.
+HELP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HELP.md")
 
 # Make sure the database table exists before anything else.
 core.init_db()
@@ -31,7 +37,9 @@ _last_backup_path = _startup_backup()
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
 
-entry_tab, search_tab, browse_tab = st.tabs(["➕ Add a link", "🔎 Search", "📚 Browse all"])
+entry_tab, search_tab, browse_tab, help_tab = st.tabs(
+    ["➕ Add a link", "🔎 Search", "📚 Browse all", "❓ Help"]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -292,30 +300,56 @@ with search_tab:
     # A form so pressing Enter in the search box runs the search, just like the button.
     with st.form("search_form"):
         query = st.text_input("Search", key="search_query", placeholder="e.g. satellite climate data")
+        mode = st.radio(
+            "Search by",
+            ["Meaning", "Exact text"],
+            horizontal=True,
+            help=(
+                "Meaning ranks saved links by how related their topic is (and "
+                "accepts a URL to paste). Exact text finds every entry that "
+                "literally contains your words — handy for names like 'Moore'."
+            ),
+        )
         search_clicked = st.form_submit_button("Search", type="primary")
 
-    top_k = st.slider("How many results?", min_value=1, max_value=25, value=5)
+    top_k = st.slider(
+        "How many results?",
+        min_value=1,
+        max_value=25,
+        value=5,
+        help="Only applies to Meaning search; Exact text shows every match.",
+    )
 
     if search_clicked:
         if not query.strip():
-            st.warning("Please enter a topic or URL.")
+            st.warning("Please enter a search term.")
         else:
+            exact = mode == "Exact text"
             try:
                 with st.spinner("Searching..."):
-                    results = core.search(query.strip(), top_k=top_k)
+                    if exact:
+                        results = core.text_search(query.strip())
+                    else:
+                        results = core.search(query.strip(), top_k=top_k)
             except Exception as exc:
                 st.error(f"Search failed: {exc}")
                 results = []
 
             if not results:
-                st.info("No matches yet — add some links first.")
+                if exact:
+                    st.info("No saved links contain that text.")
+                else:
+                    st.info("No matches yet — add some links first.")
+            elif exact:
+                st.caption(f"Found {len(results)} matching link(s).")
             for r in results:
                 with st.container(border=True):
                     st.markdown(f"**[{r['title']}]({r['url']})**")
-                    if r.get("keyword_match"):
-                        st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
-                    else:
-                        st.caption(f"Similarity: {r['score']:.0%}")
+                    if "score" in r:
+                        if r.get("keyword_match"):
+                            st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
+                        else:
+                            st.caption(f"Similarity: {r['score']:.0%}")
                     st.write(r["summary"])
                     if r["keywords"]:
                         st.caption(f"Keywords: {r['keywords']}")
@@ -407,3 +441,21 @@ with browse_tab:
                 if del_col.button("🗑 Delete", key=f"del_{eid}"):
                     core.delete_entry(eid)
                     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Help mode (how to use the app)
+# ---------------------------------------------------------------------------
+
+with help_tab:
+    st.subheader("How to use Trailhead")
+    # Load the documentation fresh on each run so edits to HELP.md appear without
+    # restarting. Read it here (not at startup) for the same reason.
+    try:
+        with open(HELP_PATH, encoding="utf-8") as f:
+            st.markdown(f.read())
+    except OSError:
+        st.warning(
+            f"Couldn't load the help file. Expected it at `{HELP_PATH}`. "
+            "Create or restore `HELP.md` next to the app to show help here."
+        )

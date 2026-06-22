@@ -45,15 +45,33 @@ click *Summarize pasted text* (or press **⌘+Enter** in the box) — the LLM th
 fills in the title, summary, and suggested keywords for you.
 
 ### 🔎 Search
-- Type a topic (or paste a URL) and press **Enter** or click **Search**.
+
+Type a topic and press **Enter** or click **Search**. The **Search by** toggle
+picks how matching works:
+
+**Meaning** (default)
 - Results are ranked by **meaning** using a local embedding model, so related
   pages show up even if they don't share the exact words.
 - Pages whose **keywords match your search term are pushed to the top** and
-  labeled `🏷 keyword match`. Searching by URL uses pure meaning-similarity.
+  labeled `🏷 keyword match`. You can also paste a **URL** to find saved links
+  most like that page (this uses pure meaning-similarity).
 - Use the slider to choose how many results to show (defaults to 5).
-- Each result lists up to **5 🔗 Related links** — the entries most similar in
-  meaning to that result, with a similarity score, so you can jump to neighbors
-  in your library.
+
+**Exact text**
+- Finds **every** entry that contains your words (case-insensitive) anywhere in
+  the title, summary, notes, keywords, or URL — handy for names or specific
+  terms, e.g. *Jones*, even when buried in a summary.
+- **Multiple words are AND-ed:** each word must appear somewhere in the entry,
+  but in any order and not necessarily next to each other — so `weather climate`
+  finds entries that mention both *weather* and *climate*.
+- **Wildcards:** `*` matches any run of characters and `?` matches exactly one,
+  so `clim*` finds *climate* and *climatology* and `wom?n` finds *woman* and
+  *women*. Wildcards apply per word, so `clim* polic*` requires both a *clim…*
+  and a *polic…* word. A literal `%` or `_` is treated as plain text.
+
+Each result lists up to **5 🔗 Related links** — the entries most similar in
+meaning to that result, with a similarity score, so you can jump to neighbors
+in your library.
 
 ### 📚 Browse all
 - Every saved link appears as a compact, collapsible row (click to expand).
