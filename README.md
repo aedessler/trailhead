@@ -112,8 +112,11 @@ Double-click **`run.command`** in Finder.
 
 - The **first** launch builds a private Python environment and downloads the
   packages (a few minutes — including a one-time ~80 MB embedding model). This
-  environment lives in a `.venv` folder and does not affect your system Python.
-- Every launch after that is fast.
+  environment does not affect your system Python.
+- Every launch after that is fast. Before launching, the script verifies the
+  environment is intact and **automatically reinstalls** it if anything is
+  missing, so a half-finished or damaged install repairs itself instead of
+  crashing.
 - The app opens in your default web browser. Closing the Terminal window quits it.
 - It runs on a fixed port (8501) and **won't start a second copy** — if Trailhead
   is already running, launching again just reopens it in your browser instead of
@@ -121,6 +124,24 @@ Double-click **`run.command`** in Finder.
 
 > If macOS blocks `run.command` ("unidentified developer"), right-click it →
 > **Open** the first time, or run `chmod +x run.command` in Terminal.
+
+### Why the Python environment lives outside this folder
+
+The environment is **not** kept inside the project. It lives at
+`~/.venvs/trailhead` on your Mac. This is deliberate.
+
+This project folder sits in `~/Documents`, which **iCloud Drive syncs**. A Python
+environment is over a gigabyte spread across many thousands of tiny files, and
+iCloud cannot keep up with that. With *Optimize Mac Storage* on, iCloud also
+**evicts** file contents to the cloud to save space, leaving empty placeholders
+on disk. Either way, the installed packages get silently emptied out and the app
+crashes with `ModuleNotFoundError: No module named 'streamlit'`. This happened
+repeatedly until the environment was moved out of the synced folder.
+
+Keeping the environment in `~/.venvs` (which iCloud does not touch) avoids this
+entirely. You don't need to do anything — `run.command` creates and uses it there
+automatically. If you ever want a clean rebuild, just delete that folder and
+relaunch; it will be recreated on the next launch.
 
 ### Optional: a Dock icon
 Open **Automator** → new **Application** → add a **Run Shell Script** action with:
@@ -163,7 +184,7 @@ and drag it to your Dock.
 | `library.db` | Your saved links (SQLite, created automatically). |
 | `backups/` | Timestamped database snapshots (created automatically). |
 | `requirements.txt` | The Python packages. |
-| `.env` | Your API key (never shared/committed). |
+| `.env` | Your API key (keep confidential). |
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |
 | `run.command` | The double-click launcher. |
 
@@ -202,7 +223,7 @@ summaries/keywords use the OpenAI-compatible chat API; semantic search uses
 
 ## Testing the engine without the UI
 ```
-source .venv/bin/activate
+source ~/.venvs/trailhead/bin/activate
 python core.py
 ```
 This fetches a test page and prints an LLM summary — a quick way to confirm your
