@@ -132,16 +132,11 @@ The environment is **not** kept inside the project. It lives at
 
 This project folder sits in `~/Documents`, which **iCloud Drive syncs**. A Python
 environment is over a gigabyte spread across many thousands of tiny files, and
-iCloud cannot keep up with that. With *Optimize Mac Storage* on, iCloud also
-**evicts** file contents to the cloud to save space, leaving empty placeholders
-on disk. Either way, the installed packages get silently emptied out and the app
-crashes with `ModuleNotFoundError: No module named 'streamlit'`. This happened
-repeatedly until the environment was moved out of the synced folder.
-
-Keeping the environment in `~/.venvs` (which iCloud does not touch) avoids this
-entirely. You don't need to do anything — `run.command` creates and uses it there
-automatically. If you ever want a clean rebuild, just delete that folder and
-relaunch; it will be recreated on the next launch.
+iCloud cannot keep up with that. Keeping the environment in `~/.venvs` (which 
+iCloud does not touch) avoids this entirely. You don't need to do anything — 
+`run.command` creates and uses it there automatically. If you ever want a clean 
+rebuild, just delete that folder and relaunch; it will be recreated on the next 
+launch.
 
 ### Optional: a Dock icon
 Open **Automator** → new **Application** → add a **Run Shell Script** action with:
@@ -166,7 +161,8 @@ and drag it to your Dock.
 - All your links live in a single SQLite file, `library.db`, in this folder.
 - **Every time the app launches**, it makes a timestamped, consistent copy into a
   `backups/` folder and keeps the 5 most recent. The Browse tab shows which
-  backup was made this session.
+  backup was made this session.  If the database gets corrupted, restore to the
+  latest backup.
 - **To restore:** quit the app, copy the snapshot you want from `backups/` back
   into this folder, and rename it to `library.db` (replacing the current one).
 - ⚠️ Don't put the live `library.db` inside iCloud/Dropbox/Google Drive — cloud
@@ -211,13 +207,6 @@ summaries/keywords use the OpenAI-compatible chat API; semantic search uses
   Header-spoofing alone can't get past publisher bot protection, so use the manual
   fallback: paste the text and click *Summarize pasted text*, or write your own
   summary/notes.
-- **A code change didn't show up.** The app doesn't auto-reload (the file watcher
-  is off to keep the terminal quiet). Quit and relaunch `run.command`.
-- **Edited the API key/model but nothing changed.** Those are read at startup —
-  restart the app after editing `.env` or `core.py`.
-- **TAMU + a Claude model returns odd/empty output.** Claude models on TAMU
-  stream by default; the app already requests non-streaming, so make sure you're
-  on the current `core.py`.
 
 ---
 
