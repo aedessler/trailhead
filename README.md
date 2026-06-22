@@ -18,7 +18,9 @@ The app has three tabs:
 ### ➕ Add a link
 1. Paste a URL and click **Fetch & Summarize** (or just press **Enter**).
 2. The app downloads the page, extracts the readable article text, and asks the
-   LLM for a short summary. **PDF links work too** — the app pulls the text
+   LLM for a short summary. The summary ends with an **`Authors:`** line naming
+   the content's author(s) (or `Authors: Unknown` when none can be determined).
+   **PDF links work too** — the app pulls the text
    straight out of the PDF and summarizes it like any other page. **Google Drive
    share links** work as well: a `…/file/d/<ID>/view` link is automatically
    rewritten to fetch the underlying file (the file must be shared with "anyone
@@ -48,10 +50,15 @@ fills in the title, summary, and suggested keywords for you.
   pages show up even if they don't share the exact words.
 - Pages whose **keywords match your search term are pushed to the top** and
   labeled `🏷 keyword match`. Searching by URL uses pure meaning-similarity.
-- Use the slider to choose how many results to show.
+- Use the slider to choose how many results to show (defaults to 5).
+- Each result lists up to **5 🔗 Related links** — the entries most similar in
+  meaning to that result, with a similarity score, so you can jump to neighbors
+  in your library.
 
 ### 📚 Browse all
 - Every saved link appears as a compact, collapsible row (click to expand).
+- Each expanded entry also lists up to **5 🔗 Related links** — the most
+  semantically similar entries in your library, each with a similarity score.
 - Each entry has **✏️ Edit** (change the title/summary/keywords/notes — the
   search index is rebuilt automatically) and **🗑 Delete**.
 
@@ -137,7 +144,7 @@ and drag it to your Dock.
 
 - All your links live in a single SQLite file, `library.db`, in this folder.
 - **Every time the app launches**, it makes a timestamped, consistent copy into a
-  `backups/` folder and keeps the 10 most recent. The Browse tab shows which
+  `backups/` folder and keeps the 5 most recent. The Browse tab shows which
   backup was made this session.
 - **To restore:** quit the app, copy the snapshot you want from `backups/` back
   into this folder, and rename it to `library.db` (replacing the current one).
