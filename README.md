@@ -322,3 +322,9 @@ browser, and closing the Command Prompt window quits it.
 >   don't double-launch — if you do, close the extra window.
 > - **`sentence-transformers`/`torch` install fine on Windows** (CPU wheels via
 >   pip) — no extra steps, just a larger first-time download.
+
+---
+
+## License
+
+Licensed under the [MIT License](LICENSE).
