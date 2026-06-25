@@ -72,3 +72,7 @@ copy a snapshot from `backups/` back into the folder, and rename it to
 > Searching and embeddings run **locally and free**. Only summaries, generated
 > titles, and keyword suggestions make an LLM call. For setup, providers, and
 > troubleshooting, see the **README**.
+
+---
+
+Written by [Andrew Dessler](https://artsci.tamu.edu/atmos-science/contact/profiles/andrew-dessler.html) · [GitHub repo](https://github.com/aedessler/trailhead)
