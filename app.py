@@ -323,6 +323,7 @@ with search_tab:
     if search_clicked:
         if not query.strip():
             st.warning("Please enter a search term.")
+            st.session_state.pop("search_results", None)
         else:
             exact = mode == "Exact text"
             try:
@@ -334,34 +335,94 @@ with search_tab:
             except Exception as exc:
                 st.error(f"Search failed: {exc}")
                 results = []
+            # Stash results so they survive the reruns triggered by Edit/Save/
+            # Cancel buttons below — otherwise the list vanishes (the form isn't
+            # re-submitted on those reruns) and the edit form never renders.
+            st.session_state["search_results"] = results
+            st.session_state["search_was_exact"] = exact
 
-            if not results:
-                if exact:
-                    st.info("No saved links contain that text.")
-                else:
-                    st.info("No matches yet — add some links first.")
-            elif exact:
-                st.caption(f"Found {len(results)} matching link(s).")
-            for r in results:
+    results = st.session_state.get("search_results")
+    if results is not None:
+        exact = st.session_state.get("search_was_exact", False)
+        if not results:
+            if exact:
+                st.info("No saved links contain that text.")
+            else:
+                st.info("No matches yet — add some links first.")
+        elif exact:
+            st.caption(f"Found {len(results)} matching link(s).")
+        for r in results:
+                rid = r["id"]
+                # Separate key prefix ("sedit") so a result here doesn't share
+                # edit state with the same entry shown in the Browse tab.
+                editing = st.session_state.get(f"sediting_{rid}", False)
                 with st.container(border=True):
-                    st.markdown(f"**[{r['title']}]({r['url']})**")
-                    if "score" in r:
-                        if r.get("keyword_match"):
-                            st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
-                        else:
-                            st.caption(f"Similarity: {r['score']:.0%}")
-                    st.write(r["summary"])
-                    if r["keywords"]:
-                        st.caption(f"Keywords: {r['keywords']}")
+                    if editing:
+                        # --- Edit form (mirrors the Browse tab editor) ---
+                        new_title = st.text_input(
+                            "Title", value=r["title"], key=f"sedit_title_{rid}"
+                        )
+                        new_summary = st.text_area(
+                            "Summary", value=r["summary"], key=f"sedit_summary_{rid}", height=160
+                        )
+                        new_keywords = st.text_input(
+                            "Keywords (comma-separated)", value=r["keywords"], key=f"sedit_kw_{rid}"
+                        )
+                        new_notes = st.text_area(
+                            "Notes", value=r.get("notes", ""), key=f"sedit_notes_{rid}", height=80
+                        )
 
-                    related = core.related_entries(r["id"], top_k=5)
-                    if related:
-                        st.caption("🔗 Related links")
-                        for rel in related:
-                            st.markdown(
-                                f"- [{rel['title'] or rel['url']}]({rel['url']}) "
-                                f"· {rel['score']:.0%}"
+                        def _clear_search_edit_state(_rid=rid):
+                            for k in (
+                                f"sediting_{_rid}", f"sedit_title_{_rid}",
+                                f"sedit_summary_{_rid}", f"sedit_kw_{_rid}",
+                                f"sedit_notes_{_rid}",
+                            ):
+                                st.session_state.pop(k, None)
+
+                        save_col, cancel_col = st.columns(2)
+                        if save_col.button("💾 Save changes", key=f"ssavedit_{rid}", type="primary"):
+                            with st.spinner("Saving..."):
+                                core.update_entry(
+                                    rid, new_title, new_summary, new_notes, new_keywords
+                                )
+                            # Refresh the cached result in place so the card shows
+                            # the edits (the cached list isn't re-fetched on rerun).
+                            r.update(
+                                title=new_title,
+                                summary=new_summary,
+                                keywords=new_keywords,
+                                notes=new_notes,
                             )
+                            _clear_search_edit_state()
+                            st.rerun()
+                        if cancel_col.button("Cancel", key=f"scanceledit_{rid}"):
+                            _clear_search_edit_state()
+                            st.rerun()
+                    else:
+                        # --- Read-only view ---
+                        st.markdown(f"**[{r['title']}]({r['url']})**")
+                        if "score" in r:
+                            if r.get("keyword_match"):
+                                st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
+                            else:
+                                st.caption(f"Similarity: {r['score']:.0%}")
+                        st.write(r["summary"])
+                        if r["keywords"]:
+                            st.caption(f"Keywords: {r['keywords']}")
+
+                        if st.button("✏️ Edit", key=f"sedit_{rid}"):
+                            st.session_state[f"sediting_{rid}"] = True
+                            st.rerun()
+
+                        related = core.related_entries(rid, top_k=5)
+                        if related:
+                            st.caption("🔗 Related links")
+                            for rel in related:
+                                st.markdown(
+                                    f"- [{rel['title'] or rel['url']}]({rel['url']}) "
+                                    f"· {rel['score']:.0%}"
+                                )
 
 
 # ---------------------------------------------------------------------------
