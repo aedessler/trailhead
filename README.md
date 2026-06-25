@@ -9,6 +9,8 @@ explored.
 It's written in Python with a browser-based UI (Streamlit) that you launch from 
 a double-click icon.
 
+[![Watch the demo](https://img.youtube.com/vi/2xghYAuxGy8/maxresdefault.jpg)](https://youtu.be/2xghYAuxGy8)
+
 ---
 
 ## What it does
