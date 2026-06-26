@@ -33,8 +33,9 @@ load_dotenv(override=True)
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Which LLM provider to use for summaries. Flip this between "openai" and "tamu".
-# (Embeddings/search always run locally and are unaffected by this switch.)
+# Which LLM provider to use for summaries: "openai", "tamu", or "none".
+# "none" skips all LLM calls (summary/title/keywords come back empty for you to
+# fill in by hand). Embeddings/search always run locally and are unaffected.
 LLM_PROVIDER = "tamu"
 
 # --- OpenAI (api.openai.com) ---
@@ -55,7 +56,8 @@ def _provider_config() -> tuple[str, str, str]:
     if LLM_PROVIDER == "tamu":
         return TAMU_BASE_URL, TAMU_MODEL, TAMU_KEY_ENV
     raise RuntimeError(
-        f"LLM_PROVIDER is '{LLM_PROVIDER}', but must be 'openai' or 'tamu'."
+        f"LLM_PROVIDER is '{LLM_PROVIDER}', but must be 'openai', 'tamu', or "
+        "'none'."
     )
 
 # Local embedding model. Small (~80 MB), runs offline, downloaded once on first
@@ -220,6 +222,8 @@ def _get_llm_client() -> OpenAI:
 
 def summarize(text: str, model: str | None = None) -> str:
     """Summarize page text in 3-5 sentences using the selected LLM provider."""
+    if LLM_PROVIDER == "none":
+        return ""  # no LLM configured — the user writes the summary by hand
     client = _get_llm_client()
     if model is None:
         _, model, _ = _provider_config()
@@ -253,6 +257,8 @@ def suggest_title(text: str, model: str | None = None) -> str:
 
     Useful when there's no page title to extract (e.g. text pasted from a PDF).
     """
+    if LLM_PROVIDER == "none":
+        return ""  # no LLM configured — caller falls back to the page title
     client = _get_llm_client()
     if model is None:
         _, model, _ = _provider_config()
@@ -281,6 +287,8 @@ def suggest_keywords(summary: str, n: int = 6, model: str | None = None) -> list
     Returns a list of lowercase tags (possibly empty if parsing fails). Callers
     should treat failure gracefully — keywords are a convenience, not required.
     """
+    if LLM_PROVIDER == "none":
+        return []  # no LLM configured — the user adds their own keywords
     client = _get_llm_client()
     if model is None:
         _, model, _ = _provider_config()
@@ -455,24 +463,38 @@ def update_entry(
     summary: str,
     notes: str = "",
     keywords: str = "",
+    url: str | None = None,
 ) -> None:
     """Update an entry's editable fields and recompute its search embedding.
 
     The embedding is rebuilt from summary + keywords + notes (same recipe as
     add_entry) so edits to your tags/notes are reflected in future searches.
+    Pass `url` to also correct the saved link; leave it None to keep the URL
+    unchanged.
     """
     text_to_embed = "\n".join(p for p in (summary, keywords, notes) if p)
     vector = embed(text_to_embed)
 
     with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE entries
-            SET title = ?, summary = ?, notes = ?, keywords = ?, embedding = ?
-            WHERE id = ?
-            """,
-            (title, summary, notes, keywords, vector.tobytes(), entry_id),
-        )
+        if url is None:
+            conn.execute(
+                """
+                UPDATE entries
+                SET title = ?, summary = ?, notes = ?, keywords = ?, embedding = ?
+                WHERE id = ?
+                """,
+                (title, summary, notes, keywords, vector.tobytes(), entry_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE entries
+                SET url = ?, title = ?, summary = ?, notes = ?, keywords = ?,
+                    embedding = ?
+                WHERE id = ?
+                """,
+                (url, title, summary, notes, keywords, vector.tobytes(), entry_id),
+            )
 
 
 def get_entry_by_url(url: str) -> dict | None:
@@ -535,7 +557,13 @@ def search(query: str, top_k: int = 5) -> list[dict]:
     is_url = query_text.lower().startswith(("http://", "https://"))
     if is_url:
         _, page_text = fetch_page(query_text)
-        query_text = summarize(page_text)
+        # With an LLM, search on the page's summary; with no LLM, fall back to the
+        # raw page text (truncated) so URL-as-query search still works. This query
+        # text is transient — nothing raw is stored.
+        if LLM_PROVIDER == "none":
+            query_text = page_text[:MAX_CHARS_FOR_SUMMARY]
+        else:
+            query_text = summarize(page_text)
         # A URL query has no meaningful keyword term to match against.
         keyword_query = ""
     else:

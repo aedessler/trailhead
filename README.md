@@ -1,6 +1,6 @@
 # 🧭 Trailhead
 
-Trailhead is a small personal Mac app for building a searchable library of web
+Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
 and you **search** your library later by meaning (not just exact words) to
 rediscover what you saved — each summary a trailhead back into a source you
@@ -9,8 +9,7 @@ explored.
 It's written in Python with a browser-based UI (Streamlit) that you launch from 
 a double-click icon.
 
-Click on the video to watch a short instruction video on how to set this up:
-[![Watch the demo](https://img.youtube.com/vi/2xghYAuxGy8/maxresdefault.jpg)](https://youtu.be/2xghYAuxGy8)
+[Watch a video](https://youtu.be/DJs1ohaFMf4?si=fbTl67AvTPnoB19d) that shows how to set-up and use the app
 
 ---
 
@@ -88,11 +87,12 @@ in your library.
 ## Choosing your LLM provider
 
 Summaries, titles, and keyword suggestions can come from the **TAMU AI** platform
-(current default) or **OpenAI**. Switch by editing one line near the top of
-`core.py`:
+(current default) or **OpenAI** — or you can turn the LLM off entirely with
+**`none`**. Switch by editing one line near the top of `core.py` (the
+`install.command` script below sets this for you):
 
 ```python
-LLM_PROVIDER = "tamu"   # or "openai"
+LLM_PROVIDER = "tamu"   # "tamu", "openai", or "none"
 ```
 
 You can also change which model each provider uses, e.g.:
@@ -102,15 +102,44 @@ TAMU_MODEL = "protected.Claude Sonnet 4.6"   # e.g. protected.gpt-4o, protected.
 OPENAI_MODEL = "gpt-4o"
 ```
 
-Both providers' code stays in place — you only flip the switch and supply the
+All providers' code stays in place — you only flip the switch and supply the
 matching key (below). Search and embeddings always run **locally** on your Mac
 and are free, offline, and unaffected by this switch.
+
+### Running without an LLM (`none`)
+
+Set `LLM_PROVIDER = "none"` to skip every LLM call — **no API key is needed**.
+In this mode the app still fetches pages, computes embeddings, and searches your
+library exactly as usual; it just leaves the **summary, title, and keyword
+suggestions blank** for you to fill in by hand in the editable form before
+saving. (Searching by a **URL** still works too — it matches on the page's raw
+text instead of a generated summary.) This is handy if you have no key, want to
+stay fully offline, or simply prefer writing your own summaries.
 
 ---
 
 ## One-time setup
 
-1. **Get an API key for your chosen provider:**
+The easiest way is the **`install.command`** script — double-click it in Finder
+(or run `./install.command` in Terminal). It walks you through everything:
+
+1. **Pick your LLM provider** — OpenAI, TAMU AI, or **None** (no LLM). It writes
+   your choice into `core.py` for you. There's also a **Leave unchanged** option
+   that keeps your current provider and `.env` untouched — handy when you just
+   want to rebuild the environment (step 3) without re-entering anything.
+2. **Paste your API key** — it writes the `.env` file for you. (Skipped when you
+   pick **None**, since no key is needed, or **Leave unchanged**.)
+3. **Builds the Python environment** — creates `~/.venvs/trailhead` and installs
+   the packages, or offers to reinstall it if one already exists.
+
+> If macOS blocks `install.command` ("unidentified developer"), right-click it →
+> **Open** the first time, or run `chmod +x install.command` in Terminal.
+
+### Setting it up manually instead
+
+If you'd rather not use the script:
+
+1. **Get an API key for your chosen provider** (skip if using `none`):
    - TAMU (current default): [chat.tamu.ai](https://chat.tamu.ai) → Settings → API Key
    - OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. **Add the key:** copy `.env.example` to `.env`:
@@ -118,7 +147,8 @@ and are free, offline, and unaffected by this switch.
    cp ".env.example" ".env"
    ```
    then edit `.env` and paste your real key on the matching line
-   (`OPENAI_API_KEY=...` or `TAMU_AI_API_KEY=...`).
+   (`OPENAI_API_KEY=...` or `TAMU_AI_API_KEY=...`). Also set `LLM_PROVIDER` in
+   `core.py` to match (see [Choosing your LLM provider](#choosing-your-llm-provider)).
 3. That's it — the first launch installs everything else automatically.
 
 > **Note on shell environment variables:** the `.env` file always wins, even if
@@ -171,6 +201,8 @@ and drag it to your Dock.
 - Each **summary**, generated **title** (for pasted text), and **keyword
   suggestion** is an LLM call. With OpenAI these cost a small amount per call (a
   funded account is required); TAMU AI is free for eligible university users.
+  With `LLM_PROVIDER = "none"` there are **no LLM calls at all** (you write the
+  summaries yourself).
 - **Search is free** — it runs the local embedding model, no API calls.
 - The **first** summary/search of a session takes a few extra seconds while the
   embedding model loads into memory; everything after that is fast.
@@ -203,6 +235,7 @@ and drag it to your Dock.
 | `requirements.txt` | The Python packages. |
 | `.env` | Your API key (keep confidential). |
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |
+| `install.command` | Guided setup: pick provider, save key, build the environment. |
 | `run.command` | The double-click launcher. |
 
 Under the hood: pages are fetched with `requests` (sending a full browser-like
@@ -237,7 +270,8 @@ source ~/.venvs/trailhead/bin/activate
 python core.py
 ```
 This fetches a test page and prints an LLM summary — a quick way to confirm your
-API key and internet access work.
+API key and internet access work. (With `LLM_PROVIDER = "none"` the summary line
+is intentionally blank, since no LLM is called.)
 
 ---
 

@@ -137,6 +137,9 @@ with entry_tab:
         e_title = st.text_input(
             "Title", value=edit_existing["title"], key=f"dup_title_{epr}"
         )
+        e_url = st.text_input(
+            "URL", value=edit_existing["url"], key=f"dup_url_{epr}"
+        )
         e_summary = st.text_area(
             "Summary", value=edit_existing["summary"], key=f"dup_summary_{epr}", height=160
         )
@@ -152,7 +155,8 @@ with entry_tab:
         if save_col.button("💾 Save changes", type="primary", key="dup_save"):
             with st.spinner("Saving..."):
                 core.update_entry(
-                    edit_existing["id"], e_title, e_summary, e_notes, e_keywords
+                    edit_existing["id"], e_title, e_summary, e_notes, e_keywords,
+                    url=e_url.strip(),
                 )
             st.session_state.pop("edit_existing", None)
             st.session_state["entry_round"] = (
@@ -362,6 +366,9 @@ with search_tab:
                         new_title = st.text_input(
                             "Title", value=r["title"], key=f"sedit_title_{rid}"
                         )
+                        new_url = st.text_input(
+                            "URL", value=r["url"], key=f"sedit_url_{rid}"
+                        )
                         new_summary = st.text_area(
                             "Summary", value=r["summary"], key=f"sedit_summary_{rid}", height=160
                         )
@@ -375,8 +382,8 @@ with search_tab:
                         def _clear_search_edit_state(_rid=rid):
                             for k in (
                                 f"sediting_{_rid}", f"sedit_title_{_rid}",
-                                f"sedit_summary_{_rid}", f"sedit_kw_{_rid}",
-                                f"sedit_notes_{_rid}",
+                                f"sedit_url_{_rid}", f"sedit_summary_{_rid}",
+                                f"sedit_kw_{_rid}", f"sedit_notes_{_rid}",
                             ):
                                 st.session_state.pop(k, None)
 
@@ -384,11 +391,13 @@ with search_tab:
                         if save_col.button("💾 Save changes", key=f"ssavedit_{rid}", type="primary"):
                             with st.spinner("Saving..."):
                                 core.update_entry(
-                                    rid, new_title, new_summary, new_notes, new_keywords
+                                    rid, new_title, new_summary, new_notes, new_keywords,
+                                    url=new_url.strip(),
                                 )
                             # Refresh the cached result in place so the card shows
                             # the edits (the cached list isn't re-fetched on rerun).
                             r.update(
+                                url=new_url.strip(),
                                 title=new_title,
                                 summary=new_summary,
                                 keywords=new_keywords,
@@ -447,6 +456,7 @@ with browse_tab:
             if editing:
                 # --- Edit form ---
                 new_title = st.text_input("Title", value=e["title"], key=f"edit_title_{eid}")
+                new_url = st.text_input("URL", value=e["url"], key=f"edit_url_{eid}")
                 new_summary = st.text_area(
                     "Summary", value=e["summary"], key=f"edit_summary_{eid}", height=160
                 )
@@ -461,8 +471,8 @@ with browse_tab:
                     # Drop the editing flag and the field values so the form
                     # reloads from the database next time it's opened.
                     for k in (
-                        f"editing_{_eid}", f"edit_title_{_eid}", f"edit_summary_{_eid}",
-                        f"edit_kw_{_eid}", f"edit_notes_{_eid}",
+                        f"editing_{_eid}", f"edit_title_{_eid}", f"edit_url_{_eid}",
+                        f"edit_summary_{_eid}", f"edit_kw_{_eid}", f"edit_notes_{_eid}",
                     ):
                         st.session_state.pop(k, None)
 
@@ -470,7 +480,8 @@ with browse_tab:
                 if save_col.button("💾 Save changes", key=f"savedit_{eid}", type="primary"):
                     with st.spinner("Saving..."):
                         core.update_entry(
-                            eid, new_title, new_summary, new_notes, new_keywords
+                            eid, new_title, new_summary, new_notes, new_keywords,
+                            url=new_url.strip(),
                         )
                     _clear_edit_state()
                     st.rerun()
