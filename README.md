@@ -9,13 +9,13 @@ explored.
 It's written in Python with a browser-based UI (Streamlit) that you launch from 
 a double-click icon.
 
-[Watch a video](https://youtu.be/DJs1ohaFMf4?si=fbTl67AvTPnoB19d) that shows how to set-up and use the app
+[Watch a video](https://youtu.be/DJs1ohaFMf4?si=fbTl67AvTPnoB19d) that shows how to set up and use the app
 
 ---
 
 ## What it does
 
-The app has three tabs:
+The app has four tabs:
 
 ### ➕ Add a link
 1. Paste a URL and click **Fetch & Summarize** (or just press **Enter**).
@@ -79,81 +79,49 @@ in your library.
 - Every saved link appears as a compact, collapsible row (click to expand).
 - Each expanded entry also lists up to **5 🔗 Related links** — the most
   semantically similar entries in your library, each with a similarity score.
-- Each entry has **✏️ Edit** (change the title/summary/keywords/notes — the
+- Each entry has **✏️ Edit** (change the URL/title/summary/keywords/notes — the
   search index is rebuilt automatically) and **🗑 Delete**.
+
+### ❓ Help
+- Shows the built-in instructions for using the app, rendered right in the
+  browser so you never have to leave it.
+- The text comes from **`HELP.md`** next to the app — edit that file to change
+  what's shown, and the update appears on the next launch.
+- If `HELP.md` is missing, the tab explains how to restore it instead of
+  failing.
 
 ---
 
-## Choosing your LLM provider
+## LLMs
 
-Summaries, titles, and keyword suggestions can come from the **TAMU AI** platform
-(current default) or **OpenAI** — or you can turn the LLM off entirely with
-**`none`**. Switch by editing one line near the top of `core.py` (the
-`install.command` script below sets this for you):
-
-```python
-LLM_PROVIDER = "tamu"   # "tamu", "openai", or "none"
-```
-
-You can also change which model each provider uses, e.g.:
-
-```python
-TAMU_MODEL = "protected.Claude Sonnet 4.6"   # e.g. protected.gpt-4o, protected.Claude Opus 4.7
-OPENAI_MODEL = "gpt-4o"
-```
-
-All providers' code stays in place — you only flip the switch and supply the
-matching key (below). Search and embeddings always run **locally** on your Mac
-and are free, offline, and unaffected by this switch.
+Summaries, titles, and keyword suggestions come from the **TAMU AI** platform
+or **OpenAI** — or you can turn the LLM off entirely with
+**`none`**. 
 
 ### Running without an LLM (`none`)
 
-Set `LLM_PROVIDER = "none"` to skip every LLM call — **no API key is needed**.
-In this mode the app still fetches pages, computes embeddings, and searches your
-library exactly as usual; it just leaves the **summary, title, and keyword
-suggestions blank** for you to fill in by hand in the editable form before
+If you choose not to use an LLM, then **no API key is needed**.  In this mode the app still fetches pages, computes embeddings, and searches your library exactly as usual; it just leaves the **summary, title, and keyword suggestions blank** for you to fill in by hand in the editable form before
 saving. (Searching by a **URL** still works too — it matches on the page's raw
 text instead of a generated summary.) This is handy if you have no key, want to
 stay fully offline, or simply prefer writing your own summaries.
 
 ---
 
-## One-time setup
+# Getting it running
 
-The easiest way is the **`install.command`** script — double-click it in Finder
-(or run `./install.command` in Terminal). It walks you through everything:
+Before you start, you have to **get an API key for your chosen provider** (skip if using `none`):
+   - TAMU (current default): [chat.tamu.ai](https://chat.tamu.ai) → Settings → API Key
+   - OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
-1. **Pick your LLM provider** — OpenAI, TAMU AI, or **None** (no LLM). It writes
-   your choice into `core.py` for you. There's also a **Leave unchanged** option
-   that keeps your current provider and `.env` untouched — handy when you just
-   want to rebuild the environment (step 3) without re-entering anything.
-2. **Paste your API key** — it writes the `.env` file for you. (Skipped when you
-   pick **None**, since no key is needed, or **Leave unchanged**.)
-3. **Builds the Python environment** — creates `~/.venvs/trailhead` and installs
+The easiest way to do the rest of the install is the **`install.command`** script — double-click it in Finder (or run `./install.command` in Terminal). It walks you through everything:
+
+1. **Choose your LLM provider**
+2. **Paste your API key** when asked (or this is skipped if you choose `none`)
+3. **Build the Python environment** — creates `~/.venvs/trailhead` and installs
    the packages, or offers to reinstall it if one already exists.
 
 > If macOS blocks `install.command` ("unidentified developer"), right-click it →
 > **Open** the first time, or run `chmod +x install.command` in Terminal.
-
-### Setting it up manually instead
-
-If you'd rather not use the script:
-
-1. **Get an API key for your chosen provider** (skip if using `none`):
-   - TAMU (current default): [chat.tamu.ai](https://chat.tamu.ai) → Settings → API Key
-   - OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-2. **Add the key:** copy `.env.example` to `.env`:
-   ```
-   cp ".env.example" ".env"
-   ```
-   then edit `.env` and paste your real key on the matching line
-   (`OPENAI_API_KEY=...` or `TAMU_AI_API_KEY=...`). Also set `LLM_PROVIDER` in
-   `core.py` to match (see [Choosing your LLM provider](#choosing-your-llm-provider)).
-3. That's it — the first launch installs everything else automatically.
-
-> **Note on shell environment variables:** the `.env` file always wins, even if
-> you have an old `OPENAI_API_KEY`/`TAMU_AI_API_KEY` exported in your shell
-> (e.g. in `~/.zshrc`). So the key shown in `.env` is the one that's used.
 
 ---
 
@@ -161,12 +129,9 @@ If you'd rather not use the script:
 
 Double-click **`run.command`** in Finder.
 
-- The **first** launch builds a private Python environment and downloads the
-  packages (a few minutes — including a one-time ~80 MB embedding model). This
-  environment does not affect your system Python.
-- Every launch after that is fast. Before launching, the script verifies the
-  environment is intact and **automatically reinstalls** it if anything is
-  missing, so a half-finished or damaged install repairs itself instead of
+- Before launching, the script verifies the Python virtual
+  environment is intact and **reinstalls** it if anything is
+  missing, so a missing, half-finished, or damaged install is repaired instead of
   crashing.
 - The app opens in your default web browser. Closing the Terminal window quits it.
 - It runs on a fixed port (8501) and **won't start a second copy** — if Trailhead
@@ -191,7 +156,7 @@ launch.
 
 ### Optional: a Dock icon
 Open **Automator** → new **Application** → add a **Run Shell Script** action with:
-`open "/Users/adessler/Desktop/data app/run.command"` — then save it as an app
+`open "~/Desktop/data app/run.command"` — then save it as an app
 and drag it to your Dock.
 
 ---
@@ -286,9 +251,9 @@ To run Trailhead on Windows you need two things: **Python installed**, and a
 [python.org/downloads](https://www.python.org/downloads/) and — important — tick
 **"Add python.exe to PATH"** on the first screen of the installer.
 
-**2. Add the API key** exactly as in [One-time setup](#one-time-setup): copy
-`.env.example` to `.env` and paste your real key. (`python-dotenv` reads `.env`
-the same way on every OS.) In a Command Prompt that's `copy ".env.example" ".env"`.
+**2. Add the API key** to the `.env` file: copy
+`.env.example` to `.env` and paste your real key in the right place. (`python-dotenv` reads `.env`
+the same way on every OS.) 
 
 **3. Create `run.bat`** in this folder (next to `app.py`) with the following
 contents. It's the Windows twin of `run.command`: it builds a private Python
