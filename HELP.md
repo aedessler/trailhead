@@ -57,8 +57,22 @@ library.
 
 #### 📚 Browse all
 Every saved link appears as a collapsible row (click to expand). Each entry has
-**✏️ Edit** (change title/summary/keywords/notes — the search index rebuilds
+**✏️ Edit** (change URL/title/summary/keywords/notes — the search index rebuilds
 automatically) and **🗑 Delete**, plus its own **🔗 Related links**.
+
+---
+
+#### 🗺 Map
+Search results and Browse entries each have a **🗺 Map** button. It draws an
+interactive graph of that entry's neighborhood: the entry itself (purple), its
+5 most-related entries (teal), and each of *their* 5 most-related (pale outer
+ring). Dot size shows how similar each entry is to the one at the center.
+Drag nodes around, scroll to zoom, hover a node for its full title or an edge
+for the similarity score. **Click any node** to see its summary, keywords, and
+notes in a **details panel beside the map** (the map doesn't change); click
+the panel's title to open the saved link in a new tab, or press the panel's
+**🗺 Map** button to recenter the map on that entry and explore outward.
+Click **✖ Hide map** to close the map.
 
 ---
 

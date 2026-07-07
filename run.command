@@ -37,7 +37,7 @@ source "$VENV_DIR/bin/activate"
 # the folder exists is not enough: an interrupted or damaged install leaves the
 # folder in place but with no packages. If the key package can't be imported,
 # (re)install everything so a broken environment self-repairs instead of crashing.
-if ! python -c "import streamlit" >/dev/null 2>&1; then
+if ! python -c "import streamlit, pyvis" >/dev/null 2>&1; then
     echo "Installing packages (this can take a few minutes)..."
     pip install --upgrade pip
     pip install -r requirements.txt

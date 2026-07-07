@@ -544,6 +544,72 @@ def related_entries(entry_id: int, top_k: int = 5) -> list[dict]:
     ]
 
 
+def map_graph(
+    entry_id: int, top_k: int = 5, depth: int = 2
+) -> tuple[list[dict], list[dict]]:
+    """Build the node/edge lists for an entry's relatedness map.
+
+    Breadth-first from `entry_id`: level 1 is its `top_k` most-related entries,
+    level 2 is each of *their* `top_k` most-related, and so on out to `depth`.
+    (Bump `depth` to 3 if you ever want one more ring.)
+
+    Returns (nodes, edges):
+      nodes — dicts of {id, url, title, level, center_score}, where level is
+              the ring the entry first appeared in (0 = the center entry
+              itself) and center_score is its cosine similarity to the center
+              entry (1.0 for the center) — used to size the map's dots;
+      edges — dicts of {a, b, score}, deduplicated as undirected pairs, since
+              outer rings often link back to entries already on the map.
+    """
+    with _connect() as conn:
+        center = conn.execute(
+            "SELECT id, url, title FROM entries WHERE id = ?", (entry_id,)
+        ).fetchone()
+    if center is None:
+        return [], []
+
+    nodes = {entry_id: {"id": entry_id, "url": center["url"],
+                        "title": center["title"], "level": 0}}
+    edges: list[dict] = []
+    seen_pairs: set[tuple[int, int]] = set()
+
+    frontier = [entry_id]
+    for level in range(1, depth + 1):
+        next_frontier = []
+        for node_id in frontier:
+            for rel in related_entries(node_id, top_k=top_k):
+                if rel["id"] not in nodes:
+                    nodes[rel["id"]] = {"id": rel["id"], "url": rel["url"],
+                                        "title": rel["title"], "level": level}
+                    next_frontier.append(rel["id"])
+                pair = tuple(sorted((node_id, rel["id"])))
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    edges.append({"a": pair[0], "b": pair[1],
+                                  "score": rel["score"]})
+        frontier = next_frontier
+
+    # Score every node against the CENTER entry (outer-ring nodes were found
+    # via their ring-1 parent, so their edge score isn't similarity to the
+    # center). The map uses this to size each dot.
+    ids = list(nodes)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT id, embedding FROM entries "
+            f"WHERE id IN ({','.join('?' * len(ids))})",
+            ids,
+        ).fetchall()
+    vecs = {r["id"]: np.frombuffer(r["embedding"], dtype=np.float32)
+            for r in rows}
+    center_vec = vecs[entry_id]
+    for nid, node in nodes.items():
+        node["center_score"] = (
+            1.0 if nid == entry_id else float(vecs[nid] @ center_vec)
+        )
+
+    return list(nodes.values()), edges
+
+
 def search(query: str, top_k: int = 5) -> list[dict]:
     """Find the entries most similar in meaning to `query`.
 

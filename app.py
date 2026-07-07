@@ -7,6 +7,7 @@ Run it with:   streamlit run app.py
 All the real work lives in core.py; this file is only the screen layout.
 """
 
+import json
 import os
 
 import streamlit as st
@@ -33,6 +34,232 @@ def _startup_backup():
 
 
 _last_backup_path = _startup_backup()
+
+
+def _vis_graph(entry_id: int) -> dict | None:
+    """One entry's neighborhood as vis.js node/edge dicts, or None if empty.
+
+    Color marks the ring (purple center, teal neighbors, pale outer ring);
+    SIZE shows similarity to the center entry. The neighbors' similarity
+    scores are rescaled to fill the size range so differences stay visible
+    even when all the raw scores are close together.
+    """
+    nodes, edges = core.map_graph(entry_id)
+    if not edges:
+        return None
+
+    colors = {0: "#7b2d8b", 1: "#2f6f6a", 2: "#9dc3c0"}
+    others = [n["center_score"] for n in nodes if n["level"] > 0]
+    lo, hi = (min(others), max(others)) if others else (0.0, 1.0)
+
+    def _size(n: dict) -> float:
+        if n["level"] == 0:
+            return 34
+        if hi == lo:
+            return 20
+        return 10 + 20 * (n["center_score"] - lo) / (hi - lo)
+
+    vis_nodes = []
+    for n in nodes:
+        full = n["title"] or n["url"]
+        label = full if len(full) <= 40 else full[:37] + "…"
+        vis_nodes.append({
+            "id": n["id"], "label": label,
+            "title": f"{full} — {n['center_score']:.0%} similar to center",
+            "size": _size(n),
+            "color": colors.get(n["level"], "#9dc3c0"),
+        })
+    vis_edges = [
+        {"from": e["a"], "to": e["b"], "width": 1 + 3 * e["score"],
+         "color": "#cccccc", "title": f"similarity {e['score']:.0%}"}
+        for e in edges
+    ]
+    return {"nodes": vis_nodes, "edges": vis_edges}
+
+
+# Precompute the neighborhood of EVERY entry (for instant recentering) plus
+# each entry's details (for the map's side panel), so clicks on the map never
+# need a server round-trip. Cached on the database file's modification time,
+# so it rebuilds only after an add/edit/delete.
+@st.cache_data
+def _map_payload(db_mtime: float) -> dict:
+    graphs, details = {}, {}
+    for e in core.all_entries():
+        g = _vis_graph(e["id"])
+        if g:
+            graphs[str(e["id"])] = g  # string keys to match JS object lookup
+        details[str(e["id"])] = {
+            "title": e["title"], "url": e["url"],
+            "summary": e["summary"], "keywords": e["keywords"],
+            "notes": e["notes"],
+        }
+    return {"graphs": graphs, "details": details}
+
+
+def _render_map(entry_id: int) -> None:
+    """Draw an interactive map of an entry and its most-related neighbors.
+
+    The center entry is highlighted, ringed by its 5 most-related entries, each
+    of which is connected to *its* 5 most-related. Nodes can be dragged; hover
+    a node for its full title, or an edge for the similarity score. Clicking a
+    node redraws the map centered on that entry and shows its summary in a
+    side panel (handled entirely in the browser — every neighborhood and
+    entry's details are embedded in the map's HTML).
+    """
+    # Imported here (not at top) so the library only loads when a map is
+    # actually drawn, matching core.py's lazy-import style.
+    from pyvis.network import Network
+
+    payload = _map_payload(os.path.getmtime(core.DB_PATH))
+    graph = payload["graphs"].get(str(entry_id))
+    if graph is None:
+        st.info("Not enough entries in the library to draw a map yet.")
+        return
+
+    net = Network(
+        height="600px", width="100%", bgcolor="#ffffff", font_color="#333333",
+        cdn_resources="in_line", notebook=False,
+    )
+    # Straight edges: vis.js's default "smooth" curves can bow two edges apart
+    # until one pair of nodes looks connected by multiple lines. (set_options
+    # replaces pyvis's defaults wholesale, so the "dot" shape — normally
+    # pyvis's default — must be restated here or nodes render as ellipses.)
+    net.set_options("""
+    const options = {
+      "nodes": {"shape": "dot"},
+      "edges": {"smooth": false},
+      "physics": {"barnesHut": {"springLength": 150}}
+    }
+    """)
+    for n in graph["nodes"]:
+        net.add_node(n["id"], label=n["label"], title=n["title"],
+                     size=n["size"], color=n["color"])
+    for e in graph["edges"]:
+        net.add_edge(e["from"], e["to"], width=e["width"],
+                     color=e["color"], title=e["title"])
+
+    # pyvis's HTML defines global `network`, `nodes`, and `edges` variables.
+    # This appended script (a) swaps the datasets when a node is clicked, and
+    # (b) shows the clicked entry's details in a panel overlaid on the map,
+    # Connected-Papers style. The panel is built with textContent (never
+    # innerHTML), so titles/summaries can't inject markup. The "</" escape in
+    # the JSON keeps a literal "</script>" inside a summary from ending the
+    # script block early.
+    map_js = """
+<script type="text/javascript">
+  const TRAILHEAD_MAPS = __GRAPHS__;
+  const TRAILHEAD_DETAILS = __DETAILS__;
+
+  // --- Details panel, in its own column to the RIGHT of the map (so it
+  // never covers the graph). The map shrinks while the panel is open and
+  // re-expands when it's closed. ---
+  const _mapbox = document.getElementById("mynetwork");
+  const _row = _mapbox.parentNode;
+  _row.style.display = "flex";
+  // pyvis's HTML uses Bootstrap, whose .card class sets flex-direction:
+  // column — restate "row" or the panel stacks under the map instead.
+  _row.style.flexDirection = "row";
+  _row.style.alignItems = "stretch";
+  _mapbox.style.flex = "1 1 auto";
+  _mapbox.style.width = "auto";
+  _mapbox.style.minWidth = "0";
+  const panel = document.createElement("div");
+  panel.style.cssText =
+    "flex:0 0 250px; position:relative; height:600px; overflow-y:auto;" +
+    "background:#ffffff; border:1px solid #dddddd; border-radius:8px;" +
+    "padding:12px 14px; margin-left:8px; font-size:13px; line-height:1.45;" +
+    "box-sizing:border-box;";
+  // Tell vis.js the map container changed size, then refit the view.
+  function resizeMap() {
+    network.setSize("100%", "600px");
+    network.redraw();
+    network.fit();
+  }
+  const closeBtn = document.createElement("div");
+  closeBtn.textContent = "\\u2715";
+  closeBtn.style.cssText =
+    "position:absolute; top:6px; right:10px; cursor:pointer; color:#999999;";
+  closeBtn.onclick = function () { panel.style.display = "none"; resizeMap(); };
+  const titleLink = document.createElement("a");
+  titleLink.target = "_blank";
+  titleLink.rel = "noopener";
+  titleLink.style.cssText =
+    "display:block; font-weight:bold; margin-right:14px;" +
+    "margin-bottom:6px; color:#1a6b64; text-decoration:none;";
+  const kwDiv = document.createElement("div");
+  kwDiv.style.cssText = "color:#888888; font-size:12px; margin-bottom:6px;";
+  const sumDiv = document.createElement("div");
+  sumDiv.style.cssText = "color:#333333; white-space:pre-wrap;";
+  const notesDiv = document.createElement("div");
+  notesDiv.style.cssText =
+    "color:#666666; font-size:12px; margin-top:6px; white-space:pre-wrap;";
+  // "Map" button at the bottom of the panel: recenters the map on the entry
+  // being shown. Hidden while the shown entry already IS the center.
+  const mapBtn = document.createElement("div");
+  mapBtn.textContent = "\\ud83d\\uddfa Map";
+  mapBtn.style.cssText =
+    "display:none; margin-top:10px; padding:6px 12px; background:#2f6f6a;" +
+    "color:#ffffff; border-radius:6px; cursor:pointer; font-size:13px;" +
+    "text-align:center; user-select:none;";
+  panel.append(closeBtn, titleLink, kwDiv, sumDiv, notesDiv, mapBtn);
+  _row.appendChild(panel);
+
+  let currentCenter = __CENTER__;
+  let selectedId = currentCenter;
+
+  function showDetails(id) {
+    const d = TRAILHEAD_DETAILS[String(id)];
+    if (!d) return;
+    selectedId = id;
+    titleLink.textContent = (d.title || d.url) + " \\u2197";
+    titleLink.href = d.url;
+    kwDiv.textContent = d.keywords ? "Keywords: " + d.keywords : "";
+    sumDiv.textContent = d.summary || "(no summary)";
+    notesDiv.textContent = d.notes ? "Notes: " + d.notes : "";
+    mapBtn.style.display =
+      (id === currentCenter || !TRAILHEAD_MAPS[String(id)])
+        ? "none" : "block";
+    const wasHidden = panel.style.display === "none";
+    panel.style.display = "block";
+    if (wasHidden) resizeMap();
+  }
+  showDetails(currentCenter);
+  resizeMap();
+
+  // Clicking a node only shows its details; the map itself doesn't change
+  // until the panel's Map button is pressed.
+  network.on("click", function (params) {
+    if (!params.nodes.length) return;
+    showDetails(params.nodes[0]);
+  });
+
+  mapBtn.onclick = function () {
+    const g = TRAILHEAD_MAPS[String(selectedId)];
+    if (!g) return;
+    currentCenter = selectedId;
+    nodes.clear(); edges.clear();
+    nodes.add(g.nodes); edges.add(g.edges);
+    mapBtn.style.display = "none";
+    network.once("stabilized", function () {
+      network.fit({animation: true});
+    });
+  };
+</script>
+"""
+    map_js = (
+        map_js
+        .replace("__GRAPHS__", json.dumps(payload["graphs"]).replace("</", "<\\/"))
+        .replace("__DETAILS__", json.dumps(payload["details"]).replace("</", "<\\/"))
+        .replace("__CENTER__", str(entry_id))
+    )
+    html = net.generate_html().replace("</body>", map_js + "</body>")
+    st.iframe(html, height=620)
+    st.caption(
+        "Dot size = similarity to the center entry. Click any node to read "
+        "its summary in the panel; the panel's title opens the saved link, "
+        "and its Map button recenters the map on that entry."
+    )
+
 
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
@@ -420,9 +647,19 @@ with search_tab:
                         if r["keywords"]:
                             st.caption(f"Keywords: {r['keywords']}")
 
-                        if st.button("✏️ Edit", key=f"sedit_{rid}"):
+                        edit_col, map_col = st.columns(2)
+                        if edit_col.button("✏️ Edit", key=f"sedit_{rid}"):
                             st.session_state[f"sediting_{rid}"] = True
                             st.rerun()
+                        map_on = st.session_state.get(f"smap_{rid}", False)
+                        if map_col.button(
+                            "✖ Hide map" if map_on else "🗺 Map",
+                            key=f"smapbtn_{rid}",
+                        ):
+                            st.session_state[f"smap_{rid}"] = not map_on
+                            st.rerun()
+                        if map_on:
+                            _render_map(rid)
 
                         related = core.related_entries(rid, top_k=5)
                         if related:
@@ -449,10 +686,11 @@ with browse_tab:
     for e in entries:
         eid = e["id"]
         editing = st.session_state.get(f"editing_{eid}", False)
+        showing_map = st.session_state.get(f"map_{eid}", False)
 
         # Collapsed by default: each row shows only the title until clicked. Keep
-        # it expanded while editing so the form stays visible.
-        with st.expander(e["title"] or e["url"], expanded=editing):
+        # it expanded while editing or showing the map so they stay visible.
+        with st.expander(e["title"] or e["url"], expanded=editing or showing_map):
             if editing:
                 # --- Edit form ---
                 new_title = st.text_input("Title", value=e["title"], key=f"edit_title_{eid}")
@@ -506,13 +744,21 @@ with browse_tab:
                             f"· {rel['score']:.0%}"
                         )
 
-                edit_col, del_col = st.columns(2)
+                edit_col, map_col, del_col = st.columns(3)
                 if edit_col.button("✏️ Edit", key=f"edit_{eid}"):
                     st.session_state[f"editing_{eid}"] = True
+                    st.rerun()
+                map_on = st.session_state.get(f"map_{eid}", False)
+                if map_col.button(
+                    "✖ Hide map" if map_on else "🗺 Map", key=f"mapbtn_{eid}"
+                ):
+                    st.session_state[f"map_{eid}"] = not map_on
                     st.rerun()
                 if del_col.button("🗑 Delete", key=f"del_{eid}"):
                     core.delete_entry(eid)
                     st.rerun()
+                if map_on:
+                    _render_map(eid)
 
 
 # ---------------------------------------------------------------------------

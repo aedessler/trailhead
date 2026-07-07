@@ -4,7 +4,8 @@ Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
 and you **search** your library later by meaning (not just exact words) to
 rediscover what you saved — each summary a trailhead back into a source you
-explored.
+explored. An interactive **🗺 map** shows how any link connects to its nearest
+neighbors, so you can also wander your library visually.
 
 It's written in Python with a browser-based UI (Streamlit) that you launch from 
 a double-click icon.
@@ -73,14 +74,32 @@ picks how matching works:
 
 Each result lists up to **5 🔗 Related links** — the entries most similar in
 meaning to that result, with a similarity score, so you can jump to neighbors
-in your library.
+in your library. A **🗺 Map** button draws an interactive graph of the
+result's neighborhood (see below).
 
 ### 📚 Browse all
 - Every saved link appears as a compact, collapsible row (click to expand).
 - Each expanded entry also lists up to **5 🔗 Related links** — the most
   semantically similar entries in your library, each with a similarity score.
 - Each entry has **✏️ Edit** (change the URL/title/summary/keywords/notes — the
-  search index is rebuilt automatically) and **🗑 Delete**.
+  search index is rebuilt automatically), **🗺 Map**, and **🗑 Delete**.
+
+### 🗺 Map
+
+Both Search results and Browse entries have a **🗺 Map** button that draws an
+interactive graph of the entry's neighborhood: the entry itself (purple),
+its 5 most-related entries (teal), and each of *their* 5 most-related (pale
+outer ring). **Dot size shows how similar each entry is to the one at the
+center.** Drag nodes around, scroll to zoom, hover a node for its full title
+or an edge for the similarity score.
+
+**Click any node** to show that entry in a **details panel beside the map** —
+its summary, keywords, and notes (the map itself doesn't change). **Click the
+panel's title to open the saved link** in a new tab, or press the panel's
+**🗺 Map button to recenter the map on that entry** and wander through your
+library's neighborhoods (recentering is instant — every neighborhood is
+precomputed). The ✕ dismisses the panel and the map widens to use the freed
+space. Click the map button on the entry again to hide the whole map.
 
 ### ❓ Help
 - Shows the built-in instructions for using the app, rendered right in the
@@ -155,9 +174,11 @@ rebuild, just delete that folder and relaunch; it will be recreated on the next
 launch.
 
 ### Optional: a Dock icon
-Open **Automator** → new **Application** → add a **Run Shell Script** action with:
-`open "~/Desktop/data app/run.command"` — then save it as an app
-and drag it to your Dock.
+Open **Automator** → new **Application** → add a **Run Shell Script** action
+with the path to wherever this folder lives, e.g.:
+`open "$HOME/Documents/trailhead/run.command"` — then save it as an app
+and drag it to your Dock. (Use `$HOME` rather than `~` — a `~` inside quotes
+doesn't expand, so the command would fail.)
 
 ---
 
@@ -168,7 +189,8 @@ and drag it to your Dock.
   funded account is required); TAMU AI is free for eligible university users.
   With `LLM_PROVIDER = "none"` there are **no LLM calls at all** (you write the
   summaries yourself).
-- **Search is free** — it runs the local embedding model, no API calls.
+- **Search and the 🗺 map are free** — they run on the local embedding model
+  and the similarity scores already stored in your library, no API calls.
 - The **first** summary/search of a session takes a few extra seconds while the
   embedding model loads into memory; everything after that is fast.
 
@@ -193,8 +215,8 @@ and drag it to your Dock.
 
 | File | Role |
 |---|---|
-| `app.py` | The UI: the Add / Search / Browse tabs. Presentation only. |
-| `core.py` | The engine: fetch page, summarize, suggest title & keywords, embed, store/search/edit, back up. |
+| `app.py` | The UI: the Add / Search / Browse / Help tabs and the 🗺 map. Presentation only. |
+| `core.py` | The engine: fetch page, summarize, suggest title & keywords, embed, store/search/edit, map, back up. |
 | `library.db` | Your saved links (SQLite, created automatically). |
 | `backups/` | Timestamped database snapshots (created automatically). |
 | `requirements.txt` | The Python packages. |
@@ -210,7 +232,8 @@ detected — by content type, extension, or `%PDF` magic bytes — and their tex
 pulled with `pypdf`);
 summaries/keywords use the OpenAI-compatible chat API; semantic search uses
 `sentence-transformers` (`all-MiniLM-L6-v2`) with cosine similarity computed in
-`numpy`.
+`numpy`; the relatedness map is drawn with `pyvis` (an interactive vis.js
+network embedded in the page).
 
 ---
 
@@ -285,7 +308,7 @@ call "%VENV_DIR%\Scripts\activate.bat"
 
 REM Verify the environment is intact before launching. If the key package can't
 REM be imported, (re)install everything so a broken environment self-repairs.
-python -c "import streamlit" >nul 2>&1
+python -c "import streamlit, pyvis" >nul 2>&1
 if errorlevel 1 (
     echo Installing packages (this can take a few minutes)...
     python -m pip install --upgrade pip
