@@ -86,16 +86,30 @@ else
     } > "$ENV_FILE"
     echo "Provider is 'none' — no API key needed. Wrote a placeholder $ENV_FILE."
 else
+    esc=$(printf '\033')
     API_KEY=""
     while [ -z "$API_KEY" ]; do
-        printf "Paste your %s key: " "$KEY_VAR"
-        # -s hides the key as it's typed/pasted.
+        printf "Paste your %s key, then press Enter: " "$KEY_VAR"
+        # Turn off the terminal's "bracketed paste" mode before reading. With
+        # it on (the default in modern terminals) a paste arrives wrapped in
+        # invisible escape codes — ESC[200~ ... ESC[201~ — which get stored as
+        # part of the key and silently corrupt it, so the app later rejects a
+        # key that looked right. Disabling it delivers the pasted text as-is.
+        printf '\033[?2004l'
+        # -s hides the key as it's pasted.
         read -rs API_KEY
         echo
+        # Belt and suspenders: on any terminal that ignored the disable above,
+        # strip leftover bracketed-paste markers, then all whitespace (API keys
+        # never contain spaces, so trimming every space/newline is safe).
+        API_KEY=$(printf '%s' "$API_KEY" \
+            | sed "s/${esc}\[20[01]~//g" \
+            | tr -d '[:space:]')
         if [ -z "$API_KEY" ]; then
             echo "The key can't be empty."
         fi
     done
+    echo "Got your $KEY_VAR (${#API_KEY} characters)."
 
     # Write a fresh .env containing just the active provider's key.
     {
