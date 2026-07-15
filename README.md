@@ -73,14 +73,18 @@ picks how matching works:
   and a *polic…* word. A literal `%` or `_` is treated as plain text.
 
 Each result lists up to **5 🔗 Related links** — the entries most similar in
-meaning to that result, with a similarity score, so you can jump to neighbors
-in your library. A **🗺 Map** button draws an interactive graph of the
-result's neighborhood (see below).
+meaning to that result, with a similarity score. Click one to open that saved
+entry **inside Trailhead**, where you can follow its related links in turn; a
+Back control returns to the previous entry or search results. The main result
+title still opens the original source page. A **🗺 Map** button draws an
+interactive graph of the result's neighborhood (see below).
 
 ### 📚 Browse all
 - Every saved link appears as a compact, collapsible row (click to expand).
 - Each expanded entry also lists up to **5 🔗 Related links** — the most
   semantically similar entries in your library, each with a similarity score.
+  Clicking one opens that saved entry inside Trailhead instead of opening its
+  source page; use Back to retrace your path or return to the full library.
 - Each entry has **✏️ Edit** (change the URL/title/summary/keywords/notes — the
   search index is rebuilt automatically), **🗺 Map**, and **🗑 Delete**.
 

@@ -261,6 +261,64 @@ def _render_map(entry_id: int) -> None:
     )
 
 
+def _open_related_entry(entry_id: int, view: str, parent_id: int) -> bool:
+    """Navigate to a related saved entry inside Search or Browse.
+
+    Each view keeps its own history stack so following related entries can be
+    undone with a Back button. False means the entry disappeared since the
+    related list was drawn (for example, another session deleted it).
+    """
+    entry = core.get_entry(entry_id)
+    if entry is None:
+        return False
+
+    if view == "search":
+        current_results = st.session_state.get("search_results")
+        if current_results is not None:
+            history = list(st.session_state.get("search_nav_history", []))
+            history.append({
+                "results": [dict(result) for result in current_results],
+                "was_exact": st.session_state.get("search_was_exact", False),
+            })
+            st.session_state["search_nav_history"] = history
+        st.session_state["search_results"] = [entry]
+        st.session_state["search_was_exact"] = False
+        return True
+
+    # In Browse, preserve the parent as an intermediate stop when the click came
+    # from the full library. Back returns to that entry, then to the full list.
+    history = list(st.session_state.get("browse_nav_history", []))
+    current_focus = st.session_state.get("browse_focus_id")
+    if current_focus is None:
+        history.extend([None, parent_id])
+    else:
+        history.append(current_focus)
+    st.session_state["browse_nav_history"] = history
+    st.session_state["browse_focus_id"] = entry_id
+    return True
+
+
+def _render_related_links(entry_id: int, view: str) -> None:
+    """Draw related entries as in-app navigation rather than external links."""
+    related = core.related_entries(entry_id, top_k=5)
+    if not related:
+        return
+
+    st.caption("🔗 Related links")
+    for rel in related:
+        title = rel["title"] or rel["url"]
+        if st.button(
+            f"→ {title} · {rel['score']:.0%}",
+            key=f"{view}_related_{entry_id}_{rel['id']}",
+            help="Open this saved entry inside Trailhead",
+            type="tertiary",
+        ):
+            if _open_related_entry(rel["id"], view, entry_id):
+                st.rerun()
+            else:
+                st.warning("That saved entry no longer exists.")
+
+
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
 
@@ -552,6 +610,9 @@ with search_tab:
     )
 
     if search_clicked:
+        # A new explicit search starts a fresh navigation trail. Related-link
+        # clicks below build their own history from these new results.
+        st.session_state.pop("search_nav_history", None)
         if not query.strip():
             st.warning("Please enter a search term.")
             st.session_state.pop("search_results", None)
@@ -574,6 +635,24 @@ with search_tab:
 
     results = st.session_state.get("search_results")
     if results is not None:
+        search_history = st.session_state.get("search_nav_history", [])
+        if search_history:
+            if st.button(
+                "← Back to previous results",
+                key="search_related_back",
+                type="tertiary",
+            ):
+                history = list(search_history)
+                previous = history.pop()
+                st.session_state["search_results"] = previous["results"]
+                st.session_state["search_was_exact"] = previous["was_exact"]
+                if history:
+                    st.session_state["search_nav_history"] = history
+                else:
+                    st.session_state.pop("search_nav_history", None)
+                st.rerun()
+            st.caption("Viewing a saved entry selected from Related links.")
+
         exact = st.session_state.get("search_was_exact", False)
         if not results:
             if exact:
@@ -661,14 +740,7 @@ with search_tab:
                         if map_on:
                             _render_map(rid)
 
-                        related = core.related_entries(rid, top_k=5)
-                        if related:
-                            st.caption("🔗 Related links")
-                            for rel in related:
-                                st.markdown(
-                                    f"- [{rel['title'] or rel['url']}]({rel['url']}) "
-                                    f"· {rel['score']:.0%}"
-                                )
+                        _render_related_links(rid, "search")
 
 
 # ---------------------------------------------------------------------------
@@ -677,8 +749,47 @@ with search_tab:
 
 with browse_tab:
     st.subheader("Everything in your library")
-    entries = core.all_entries()
-    st.caption(f"{len(entries)} saved link(s)")
+    all_browse_entries = core.all_entries()
+    browse_focus_id = st.session_state.get("browse_focus_id")
+    focused_entry = (
+        next(
+            (entry for entry in all_browse_entries if entry["id"] == browse_focus_id),
+            None,
+        )
+        if browse_focus_id is not None
+        else None
+    )
+
+    # Recover gracefully if a focused entry was deleted in another session.
+    if browse_focus_id is not None and focused_entry is None:
+        st.session_state.pop("browse_focus_id", None)
+        st.session_state.pop("browse_nav_history", None)
+        browse_focus_id = None
+
+    if focused_entry is not None:
+        browse_history = st.session_state.get("browse_nav_history", [])
+        previous_is_library = bool(browse_history) and browse_history[-1] is None
+        back_label = (
+            "← Back to all entries" if previous_is_library
+            else "← Back to previous entry"
+        )
+        if st.button(back_label, key="browse_related_back", type="tertiary"):
+            history = list(browse_history)
+            previous = history.pop() if history else None
+            if previous is None:
+                st.session_state.pop("browse_focus_id", None)
+            else:
+                st.session_state["browse_focus_id"] = previous
+            if history:
+                st.session_state["browse_nav_history"] = history
+            else:
+                st.session_state.pop("browse_nav_history", None)
+            st.rerun()
+        st.caption("Viewing a saved entry selected from Related links.")
+        entries = [focused_entry]
+    else:
+        entries = all_browse_entries
+        st.caption(f"{len(entries)} saved link(s)")
     if _last_backup_path:
         import os as _os
         st.caption(f"🛟 Auto-backup this session: backups/{_os.path.basename(_last_backup_path)}")
@@ -690,7 +801,10 @@ with browse_tab:
 
         # Collapsed by default: each row shows only the title until clicked. Keep
         # it expanded while editing or showing the map so they stay visible.
-        with st.expander(e["title"] or e["url"], expanded=editing or showing_map):
+        with st.expander(
+            e["title"] or e["url"],
+            expanded=editing or showing_map or focused_entry is not None,
+        ):
             if editing:
                 # --- Edit form ---
                 new_title = st.text_input("Title", value=e["title"], key=f"edit_title_{eid}")
@@ -735,14 +849,7 @@ with browse_tab:
                 if e["notes"]:
                     st.caption(f"Notes: {e['notes']}")
 
-                related = core.related_entries(eid, top_k=5)
-                if related:
-                    st.caption("🔗 Related links")
-                    for rel in related:
-                        st.markdown(
-                            f"- [{rel['title'] or rel['url']}]({rel['url']}) "
-                            f"· {rel['score']:.0%}"
-                        )
+                _render_related_links(eid, "browse")
 
                 edit_col, map_col, del_col = st.columns(3)
                 if edit_col.button("✏️ Edit", key=f"edit_{eid}"):
@@ -756,6 +863,9 @@ with browse_tab:
                     st.rerun()
                 if del_col.button("🗑 Delete", key=f"del_{eid}"):
                     core.delete_entry(eid)
+                    if st.session_state.get("browse_focus_id") == eid:
+                        st.session_state.pop("browse_focus_id", None)
+                        st.session_state.pop("browse_nav_history", None)
                     st.rerun()
                 if map_on:
                     _render_map(eid)

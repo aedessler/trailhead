@@ -457,6 +457,17 @@ def all_entries() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def get_entry(entry_id: int) -> dict | None:
+    """Return one saved entry by id (without its raw embedding), if it exists."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "FROM entries WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def update_entry(
     entry_id: int,
     title: str,

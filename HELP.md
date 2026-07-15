@@ -50,15 +50,19 @@ Pick a mode with the **Search by** toggle:
   Wildcards work per word, so `clim* polic*` finds entries containing both a
   *clim…* word and a *polic…* word. A literal `%` or `_` is treated as plain text.
 
-Each result lists up to **5 🔗 Related links** so you can hop to neighbors in your
-library.
+Each result lists up to **5 🔗 Related links**. Click one to open that saved entry
+inside Trailhead, then keep following its related links or use **Back** to return
+to the previous entry or search results. The result's main title is what opens
+the original source page.
 
 ---
 
 #### 📚 Browse all
 Every saved link appears as a collapsible row (click to expand). Each entry has
 **✏️ Edit** (change URL/title/summary/keywords/notes — the search index rebuilds
-automatically) and **🗑 Delete**, plus its own **🔗 Related links**.
+automatically) and **🗑 Delete**, plus its own **🔗 Related links**. Clicking a
+related link opens that saved entry inside Trailhead; use **Back** to retrace
+your path or return to the full library.
 
 ---
 
