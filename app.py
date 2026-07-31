@@ -9,6 +9,7 @@ All the real work lives in core.py; this file is only the screen layout.
 
 import json
 import os
+from datetime import date
 
 import streamlit as st
 
@@ -21,6 +22,10 @@ SUGGESTED_KEYWORDS = ["climate", "satellites", "methods", "policy", "data", "mod
 # The Help tab renders this Markdown file. It lives next to app.py so you can edit
 # the documentation without touching the code; changes show on the next rerun.
 HELP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HELP.md")
+
+# Same idea for the Backup tab's explanatory text: prose lives in Markdown, not
+# in Python strings, so it can be reworded without touching the app.
+BACKUP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "BACKUP.md")
 
 # Make sure the database table exists before anything else.
 core.init_db()
@@ -67,6 +72,31 @@ def _render_entry_image(entry: dict, width: int = 360) -> None:
         st.image(path, width=width)
     except Exception:
         st.caption(f"🖼 Image file unreadable ({name})")
+
+
+def _human_size(num_bytes: int) -> str:
+    """Bytes as a short human string: 812 KB, 3.1 MB, 1.2 GB."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit != "MB" else f"{size:.1f} MB"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _friendly_time(when) -> str:
+    """A timestamp as 'today 08:41', 'yesterday 22:11', or 'Jul 28 11:47'.
+
+    Recent snapshots are the ones you'd actually restore, so the two most
+    recent days are worth naming rather than making you decode a date.
+    """
+    today = date.today()
+    day = when.date()
+    if day == today:
+        return f"today {when:%H:%M}"
+    if (today - day).days == 1:
+        return f"yesterday {when:%H:%M}"
+    return f"{when:%b %-d %H:%M}"
 
 
 def _render_image_health() -> None:
@@ -406,8 +436,8 @@ def _render_related_links(entry_id: int, view: str) -> None:
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
 
-entry_tab, search_tab, browse_tab, help_tab = st.tabs(
-    ["➕ Add a link", "🔎 Search", "📚 Browse all", "❓ Help"]
+entry_tab, search_tab, browse_tab, backup_tab, help_tab = st.tabs(
+    ["➕ Add a link", "🔎 Search", "📚 Browse all", "🛟 Backup", "❓ Help"]
 )
 
 
@@ -948,62 +978,6 @@ with browse_tab:
     else:
         entries = all_browse_entries
         st.caption(f"{len(entries)} saved link(s)")
-    if _last_backup_path:
-        import os as _os
-        st.caption(f"🛟 Auto-backup this session: backups/{_os.path.basename(_last_backup_path)}")
-
-    _render_image_health()
-
-    # Deleting an entry leaves its image file behind on purpose, so that
-    # restoring an older database snapshot never lands on a missing picture.
-    # This is the deliberate way to reclaim that space.
-    orphans = core.unused_images()
-    if orphans:
-        orphan_mb = sum(
-            os.path.getsize(os.path.join(core.IMAGE_DIR, n))
-            for n in orphans
-        ) / (1024 * 1024)
-        with st.expander(
-            f"🧹 {len(orphans)} unused image file(s) · {orphan_mb:.1f} MB"
-        ):
-            st.caption(
-                "Images left behind by deleted entries. They're kept so that "
-                "restoring an older backup still finds every picture it refers "
-                "to — deleting them now can break those older restores."
-            )
-            also_backups = st.checkbox(
-                "Also delete the backup copies in backups/images",
-                key="cleanup_backups_too",
-                help=(
-                    "Leave this off and the pictures stay recoverable from the "
-                    "backup mirror. Turn it on to free the space for good — "
-                    "that cannot be undone."
-                ),
-            )
-            if st.session_state.get("confirm_image_cleanup"):
-                st.warning(
-                    f"Permanently delete {len(orphans)} file(s)"
-                    + (" and their backup copies?" if also_backups else "?")
-                )
-                yes_col, no_col = st.columns(2)
-                if yes_col.button("Yes, delete them", key="do_image_cleanup"):
-                    removed, freed = core.delete_unused_images(
-                        include_backups=also_backups
-                    )
-                    st.session_state.pop("confirm_image_cleanup", None)
-                    st.session_state["cleanup_note"] = (
-                        f"Deleted {removed} file(s), freed "
-                        f"{freed / (1024 * 1024):.1f} MB."
-                    )
-                    st.rerun()
-                if no_col.button("Cancel", key="cancel_image_cleanup"):
-                    st.session_state.pop("confirm_image_cleanup", None)
-                    st.rerun()
-            elif st.button("Clean up unused images", key="ask_image_cleanup"):
-                st.session_state["confirm_image_cleanup"] = True
-                st.rerun()
-    if st.session_state.get("cleanup_note"):
-        st.success(st.session_state.pop("cleanup_note"))
 
     for e in entries:
         eid = e["id"]
@@ -1082,6 +1056,102 @@ with browse_tab:
                     st.rerun()
                 if map_on:
                     _render_map(eid)
+
+
+# ---------------------------------------------------------------------------
+# Backup mode (what's saved, and the tools that change it)
+# ---------------------------------------------------------------------------
+
+with backup_tab:
+    st.subheader("Backups")
+
+    snapshots = core.list_backups()
+    if not snapshots:
+        st.info("No snapshots yet — one is saved automatically each time the app starts.")
+    else:
+        st.markdown(f"**Database snapshots** ({len(snapshots)} kept, newest first)")
+        rows = ["| Snapshot | When | Size |", "|---|---|---|"]
+        for snap in snapshots:
+            marker = " ←&nbsp;this session" if snap["path"] == _last_backup_path else ""
+            rows.append(
+                f"| `{snap['name']}`{marker} | {_friendly_time(snap['modified'])} "
+                f"| {_human_size(snap['size'])} |"
+            )
+        st.markdown("\n".join(rows))
+
+    st.caption(
+        f"images/ {_human_size(core.folder_size(core.IMAGE_DIR))} · "
+        f"backups/ {_human_size(core.folder_size(core.BACKUP_DIR))}"
+    )
+
+    st.divider()
+
+    _render_image_health()
+
+    # Deleting an entry leaves its image file behind on purpose, so that
+    # restoring an older database snapshot never lands on a missing picture.
+    # This is the deliberate way to reclaim that space.
+    orphans = core.unused_images()
+    if orphans:
+        orphan_mb = sum(
+            os.path.getsize(os.path.join(core.IMAGE_DIR, n))
+            for n in orphans
+        ) / (1024 * 1024)
+        with st.expander(
+            f"🧹 {len(orphans)} unused image file(s) · {orphan_mb:.1f} MB"
+        ):
+            st.caption(
+                "Images left behind by deleted entries. They're kept so that "
+                "restoring an older backup still finds every picture it refers "
+                "to. Clearing them here is safe — the backup copies stay put "
+                "unless you tick the box below."
+            )
+            also_backups = st.checkbox(
+                "Also delete the backup copies in backups/images",
+                key="cleanup_backups_too",
+                help=(
+                    "Leave this off and the pictures stay recoverable from the "
+                    "backup mirror. Turn it on to free the space for good — "
+                    "that cannot be undone."
+                ),
+            )
+            if st.session_state.get("confirm_image_cleanup"):
+                st.warning(
+                    f"Permanently delete {len(orphans)} file(s)"
+                    + (" and their backup copies?" if also_backups else "?")
+                )
+                yes_col, no_col = st.columns(2)
+                if yes_col.button("Yes, delete them", key="do_image_cleanup"):
+                    removed, freed = core.delete_unused_images(
+                        include_backups=also_backups
+                    )
+                    st.session_state.pop("confirm_image_cleanup", None)
+                    st.session_state["cleanup_note"] = (
+                        f"Deleted {removed} file(s), freed "
+                        f"{freed / (1024 * 1024):.1f} MB."
+                    )
+                    st.rerun()
+                if no_col.button("Cancel", key="cancel_image_cleanup"):
+                    st.session_state.pop("confirm_image_cleanup", None)
+                    st.rerun()
+            elif st.button("Clean up unused images", key="ask_image_cleanup"):
+                st.session_state["confirm_image_cleanup"] = True
+                st.rerun()
+    if st.session_state.get("cleanup_note"):
+        st.success(st.session_state.pop("cleanup_note"))
+
+    st.divider()
+
+    # Same fresh-read reasoning as the Help tab below: edit the Markdown, not
+    # the code, and the change shows on the next rerun.
+    try:
+        with open(BACKUP_PATH, encoding="utf-8") as f:
+            st.markdown(f.read())
+    except OSError:
+        st.warning(
+            f"Couldn't load the backup notes. Expected them at `{BACKUP_PATH}`. "
+            "Create or restore `BACKUP.md` next to the app to show them here."
+        )
 
 
 # ---------------------------------------------------------------------------

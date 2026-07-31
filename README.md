@@ -120,6 +120,18 @@ library's neighborhoods (recentering is instant — every neighborhood is
 precomputed). The ✕ dismisses the panel and the map widens to use the freed
 space. Click the map button on the entry again to hide the whole map.
 
+### 🛟 Backup
+- Lists every database snapshot you currently have — name, when it was made, and
+  size — with the one from this session marked, plus how much space `images/`
+  and `backups/` are using.
+- Shows whether your saved images are mirrored and healthy, and reports anything
+  the app restored or repaired at launch. **🔍 Verify all images** runs a full
+  checksum pass on demand.
+- Holds the **🧹 unused image file(s)** cleanup panel, and the instructions for
+  restoring a snapshot.
+- The explanatory text comes from **`BACKUP.md`** next to the app, the same way
+  the Help tab uses `HELP.md`.
+
 ### ❓ Help
 - Shows the built-in instructions for using the app, rendered right in the
   browser so you never have to leave it.
@@ -223,9 +235,9 @@ doesn't expand, so the command would fail.)
 
 - All your links live in a single SQLite file, `library.db`, in this folder.
 - **Every time the app launches**, it makes a timestamped, consistent copy into a
-  `backups/` folder and keeps the 5 most recent. The Browse tab shows which
-  backup was made this session.  If the database gets corrupted, restore to the
-  latest backup.
+  `backups/` folder and keeps the 5 most recent. The **Backup tab** lists them
+  all and marks the one made this session. If the database gets corrupted,
+  restore to the latest backup.
 - **To restore:** quit the app, copy the snapshot you want from `backups/` back
   into this folder, and rename it to `library.db` (replacing the current one).
 - **Saved images live in `images/`, not in the database** — that keeps
@@ -237,7 +249,7 @@ doesn't expand, so the command would fail.)
   `manifest.json` alongside them records each file's size and SHA-256.
 - **Damaged or missing pictures are repaired automatically.** Each launch checks
   every image's size against that manifest; anything missing or the wrong size
-  is restored from the mirror and reported in the Browse tab. The **🔍 Verify
+  is restored from the mirror and reported in the Backup tab. The **🔍 Verify
   all images** button there does a full checksum pass on demand, which also
   catches damage that happens to preserve the file's length. If both copies
   disagree with the manifest, the app reports the file as damaged and changes
@@ -249,7 +261,7 @@ doesn't expand, so the command would fail.)
   deleting also erased the picture, restoring an older snapshot would bring
   back entries whose images were gone. (If a file does go missing, the app shows
   a small "image file missing" note rather than breaking.)
-- Those leftovers collect over time, so the Browse tab shows a **"unused image
+- Those leftovers collect over time, so the Backup tab shows a **"unused image
   file(s)"** panel with a cleanup button when there are any. By default it
   clears `images/` but keeps the mirrored copies, so the pictures stay
   recoverable and older snapshots still restore correctly. A checkbox deletes
@@ -274,6 +286,8 @@ doesn't expand, so the command would fail.)
 | `images/` | Saved image files (created automatically; the database stores only their names). |
 | `backups/` | Timestamped database snapshots (created automatically; images are *not* inside them). |
 | `backups/images/` | Mirrored copies of your image files, plus a `manifest.json` of sizes and checksums used to detect and repair damage. |
+| `HELP.md` | The text shown on the Help tab — edit it to change what's shown. |
+| `BACKUP.md` | The explanatory text shown at the bottom of the Backup tab. |
 | `requirements.txt` | The Python packages. |
 | `.env` | Your API key (keep confidential). |
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |

@@ -93,32 +93,11 @@ Click **✖ Hide map** to close the map.
 
 ---
 
-#### 🛟 Your data & backups
-All your links live in a single `library.db` file in the app folder. **Every
-launch** the app saves a timestamped copy into `backups/` and keeps the 5 most
-recent (the Browse tab shows this session's backup). To restore, quit the app,
-copy a snapshot from `backups/` back into the folder, and rename it to
-`library.db`.
-
-Saved **images live in the `images/` folder**, not inside `library.db` — so the
-backup snapshots don't contain your pictures. Keep `images/` with the project
-when you move or copy it.
-
-**They are backed up too.** Every launch the app copies any new picture into
-`backups/images/` and checks the ones already there. If an image goes missing or
-its file is damaged, it's **put back from that copy automatically** and the
-Browse tab says so. The **🔍 Verify all images** button there runs a thorough
-check whenever you want one. This protects against an accidental delete or a
-damaged file; it is not a substitute for keeping a copy of the whole folder
-somewhere else.
-
-**Cleaning up `images/`:** deleting an entry leaves its image file behind on
-purpose. Those leftovers add up, so when there are any the top of the Browse tab
-shows a **🧹 unused image file(s)** panel — open it, click **Clean up unused
-images**, and confirm. By default this clears `images/` but keeps the backup
-copy, so the picture is still recoverable and restoring an older snapshot still
-finds it. Tick **Also delete the backup copies** to reclaim the space for good —
-that one can't be undone.
+#### 🛟 Backup
+Your library backs itself up every time the app starts, and your saved images
+are copied and checked automatically too. The **Backup tab** lists the snapshots
+you currently have, shows what's protected, explains how to restore one, and is
+where you verify or clean up image files.
 
 > Searching and embeddings run **locally and free**. Only summaries, generated
 > titles, and keyword suggestions make an LLM call. For setup, providers, and

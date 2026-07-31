@@ -660,6 +660,47 @@ def backup_database(keep: int = 5) -> str | None:
     return dest
 
 
+def list_backups() -> list[dict]:
+    """Every database snapshot in ./backups, newest first.
+
+    Uses the same glob pattern backup_database() writes and prunes with, so
+    this listing can't drift from what the rotation actually keeps. The
+    timestamped names sort chronologically, so reversing gives newest first.
+    """
+    snapshots = []
+    for path in sorted(
+        glob.glob(os.path.join(BACKUP_DIR, "library-*.db")), reverse=True
+    ):
+        try:
+            info = os.stat(path)
+        except OSError:
+            continue  # vanished between the glob and the stat; just skip it
+        snapshots.append(
+            {
+                "path": path,
+                "name": os.path.basename(path),
+                "size": info.st_size,
+                "modified": datetime.fromtimestamp(info.st_mtime),
+            }
+        )
+    return snapshots
+
+
+def folder_size(path: str) -> int:
+    """Total bytes of everything under a folder, or 0 if it isn't there.
+
+    Recursive because ./backups now contains the image mirror as a subfolder.
+    """
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
 def _load_manifest() -> dict:
     """The image manifest: {filename: {"size": int, "sha256": str}}.
 
