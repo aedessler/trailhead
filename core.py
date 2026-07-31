@@ -37,6 +37,14 @@ load_dotenv(override=True)
 # Configuration
 # ---------------------------------------------------------------------------
 
+# The app's version, and the ONLY place it is written down — app.py, the README
+# and the git tag all take their number from here, because a version string
+# copied into a second file always drifts out of step with the first.
+# Bump the minor part for new features and fixes, the major part for a release
+# big enough that you'd tell someone about it. Tag each release in git to match
+# (`git tag -a v2.0`), so an old version stays downloadable.
+__version__ = "2.0"
+
 # Which LLM provider to use for summaries: "openai", "tamu", or "none".
 # "none" skips all LLM calls (summary/title/keywords come back empty for you to
 # fill in by hand). Embeddings/search always run locally and are unaffected.

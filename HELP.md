@@ -68,6 +68,10 @@ inside Trailhead, then keep following its related links or use **Back** to retur
 to the previous entry or search results. The result's main title is what opens
 the original source page.
 
+> Searching and embeddings run **locally and free**. Only summaries, generated
+> titles, and keyword suggestions make an LLM call. For setup, providers, and
+> troubleshooting, see the **README**.
+
 ---
 
 #### 📚 Browse all
@@ -98,10 +102,6 @@ Your library backs itself up every time the app starts, and your saved images
 are copied and checked automatically too. The **Backup tab** lists the snapshots
 you currently have, shows what's protected, explains how to restore one, and is
 where you verify or clean up image files.
-
-> Searching and embeddings run **locally and free**. Only summaries, generated
-> titles, and keyword suggestions make an LLM call. For setup, providers, and
-> troubleshooting, see the **README**.
 
 ---
 

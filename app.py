@@ -435,6 +435,7 @@ def _render_related_links(entry_id: int, view: str) -> None:
 
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
+st.caption(f"version {core.__version__}")
 
 entry_tab, search_tab, browse_tab, backup_tab, help_tab = st.tabs(
     ["➕ Add a link", "🔎 Search", "📚 Browse all", "🛟 Backup", "❓ Help"]

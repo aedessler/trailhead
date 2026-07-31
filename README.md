@@ -1,5 +1,7 @@
 # 🧭 Trailhead
 
+**Version 2.0**
+
 Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
 and you **search** your library later by meaning (not just exact words) to
@@ -414,6 +416,32 @@ browser, and closing the Command Prompt window quits it.
 >   don't double-launch — if you do, close the extra window.
 > - **`sentence-transformers`/`torch` install fine on Windows** (CPU wheels via
 >   pip) — no extra steps, just a larger first-time download.
+
+---
+
+## Versions
+
+The version shows under the title in the app, and lives in exactly one place in
+the code: `__version__` at the top of `core.py`. Everything else reads it from
+there — never write the number into a second file, or the two will drift.
+
+To cut a release: bump `__version__`, update the number at the top of this file,
+commit, then tag it so the old version stays downloadable.
+
+```bash
+git tag -a v2.1 -m "Trailhead 2.1" && git push origin v2.1
+```
+
+GitHub builds a downloadable zip for every tag, so "send me version 2" is a
+link: `https://github.com/aedessler/trailhead/archive/refs/tags/v2.0.zip`.
+
+Bump the **minor** part (2.0 → 2.1) for features and fixes, the **major** part
+for a release big enough that you'd tell someone about it. Version 2 is the one
+that added saved images, the backup mirror, and the Backup tab.
+
+> Your `library.db` doesn't need a version of its own — `init_db()` checks the
+> table's columns on every launch and adds anything missing, so an older library
+> upgrades itself.
 
 ---
 
