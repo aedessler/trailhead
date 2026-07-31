@@ -1,13 +1,14 @@
 # 🧭 Trailhead
 
-**Version 2.0**
+**Version 2.1**
 
 Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
 and you **search** your library later by meaning (not just exact words) to
 rediscover what you saved — each summary a trailhead back into a source you
-explored. You can save **images** the same way — upload a figure or screenshot
-and the LLM describes what it shows, so it's findable by meaning too. An
+explored. You can save **images** the same way — upload a figure or screenshot,
+or paste the address of one on the web, and the LLM describes what it shows so
+it's findable by meaning too. An
 interactive **🗺 map** shows how any entry connects to its nearest neighbors,
 so you can also wander your library visually.
 
@@ -54,15 +55,29 @@ fills in the title, summary, and suggested keywords for you.
 #### 🖼 Adding an image
 
 Open **"Or add an image"** on the same tab to save a figure, chart, or
-screenshot instead of a page. Choose the file, optionally paste the **source
-link** it came from, and click **Describe & add image**: the LLM looks at the
-picture and writes a description of what it shows, then suggests a title and
-keywords. You review and edit all of it before saving, exactly as with a link.
+screenshot instead of a page. The **Image from** toggle picks where it comes
+from:
+
+- **A file on this Mac** — choose a `.png`, `.jpg`, `.gif`, or `.webp` file.
+- **A web address** — paste the address of the picture itself (right-click an
+  image in your browser ▸ *Copy Image Address*). It previews as you paste, and
+  the file is downloaded and saved locally like any other, so it stays yours
+  even if the original page changes or disappears. If you leave **Source link**
+  blank, that address becomes the entry's link.
+
+Either way, optionally paste the **source link** it came from, then click
+**Describe & add image**: the LLM looks at the picture and writes a description
+of what it shows, then suggests a title and keywords. You review and edit all of
+it before saving, exactly as with a link.
 
 That description is what makes the image searchable — the search index is built
 from it, so later you can find a figure by describing its content rather than
 remembering its filename. The original file is copied into an `images/` folder
 next to the app; the database stores only its name.
+
+Pasting the address of a *page* rather than an image gets a message saying so.
+Formats Trailhead doesn't store (SVG, TIFF, BMP) are refused rather than saved
+under a misleading name, and a download is abandoned past 25 MB.
 
 ### 🔎 Search
 
@@ -430,15 +445,16 @@ To cut a release: bump `__version__`, update the number at the top of this file,
 commit, then tag it so the old version stays downloadable.
 
 ```bash
-git tag -a v2.1 -m "Trailhead 2.1" && git push origin v2.1
+git tag -a v2.2 -m "Trailhead 2.2" && git push origin v2.2
 ```
 
 GitHub builds a downloadable zip for every tag, so "send me version 2" is a
-link: `https://github.com/aedessler/trailhead/archive/refs/tags/v2.0.zip`.
+link: `https://github.com/aedessler/trailhead/archive/refs/tags/v2.1.zip`.
 
 Bump the **minor** part (2.0 → 2.1) for features and fixes, the **major** part
 for a release big enough that you'd tell someone about it. Version 2 is the one
-that added saved images, the backup mirror, and the Backup tab.
+that added saved images, the backup mirror, and the Backup tab; 2.1 added saving
+an image straight from a web address.
 
 > Your `library.db` doesn't need a version of its own — `init_db()` checks the
 > table's columns on every launch and adds anything missing, so an older library

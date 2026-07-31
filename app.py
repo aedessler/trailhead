@@ -533,11 +533,38 @@ with entry_tab:
     # from the summary. The uploader's key includes entry_round so it clears
     # itself after a save, like the URL box.
     with st.expander("🖼 Or add an image (figure, chart, screenshot)"):
-        uploaded = st.file_uploader(
-            "Choose an image",
-            type=["png", "jpg", "jpeg", "gif", "webp"],
-            key=f"image_upload_{round_n}",
+        # Two ways in, one path out: both branches produce raw bytes and a
+        # filename, which is exactly what save_image() and summarize_image()
+        # take, so nothing below here cares where the picture came from.
+        # Keyed without round_n, unlike the inputs below it: the boxes should
+        # empty after a save, but which *way* you add images is a habit, so
+        # picking it once should stick for the rest of the session.
+        image_mode = st.radio(
+            "Image from",
+            ["A file on this Mac", "A web address"],
+            horizontal=True,
+            key="image_mode",
         )
+        uploaded = None
+        image_url = ""
+        if image_mode == "A file on this Mac":
+            uploaded = st.file_uploader(
+                "Choose an image",
+                type=[e.lstrip(".") for e in core.IMAGE_EXTENSIONS],
+                key=f"image_upload_{round_n}",
+            )
+        else:
+            image_url = st.text_input(
+                "Image address",
+                key=f"image_url_{round_n}",
+                placeholder="https://.../figure.png",
+                help=(
+                    "The address of the picture itself, not the page holding "
+                    "it — right-click the image and choose 'Copy Image "
+                    "Address'. The file is downloaded and saved into images/, "
+                    "so it stays yours even if the original disappears."
+                ),
+            )
         image_source = st.text_input(
             "Source link (optional)",
             key=f"image_source_{round_n}",
@@ -545,13 +572,30 @@ with entry_tab:
         )
         if uploaded is not None:
             st.image(uploaded, width=320)
+        elif image_url.strip().startswith(("http://", "https://")):
+            # Preview straight from the address so a wrong link is obvious
+            # before anything is downloaded or described. Some sites refuse to
+            # be shown on another page, so a blank here isn't a verdict.
+            st.image(image_url.strip(), width=320)
         if st.button("Describe & add image", type="primary", key=f"image_go_{round_n}"):
-            if uploaded is None:
-                st.warning("Choose an image first.")
+            data: bytes | None = None
+            source_name = ""
+            if image_mode == "A file on this Mac":
+                if uploaded is None:
+                    st.warning("Choose an image first.")
+                else:
+                    data, source_name = uploaded.getvalue(), uploaded.name
+            elif not image_url.strip():
+                st.warning("Paste the address of an image first.")
             else:
+                try:
+                    with st.spinner("Downloading the image..."):
+                        data, source_name = core.fetch_image(image_url)
+                except Exception as exc:
+                    st.error(f"Couldn't get that image: {exc}")
+            if data is not None:
                 st.session_state.pop("edit_existing", None)
-                data = uploaded.getvalue()
-                stored_name = core.save_image(data, uploaded.name)
+                stored_name = core.save_image(data, source_name)
                 summary = ""
                 try:
                     with st.spinner("Looking at the image..."):
@@ -575,8 +619,11 @@ with entry_tab:
                     except Exception:
                         pass  # title/keywords are optional; the description matters
                 st.session_state["pending"] = {
-                    "url": image_source.strip(),
-                    "title": title or uploaded.name,
+                    # A pasted image address doubles as the entry's link when no
+                    # separate source is given, so the saved entry still points
+                    # back at something.
+                    "url": image_source.strip() or image_url.strip(),
+                    "title": title or source_name,
                     "summary": summary,
                     "manual": not summary,
                     "suggested_keywords": suggested,

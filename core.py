@@ -43,7 +43,7 @@ load_dotenv(override=True)
 # Bump the minor part for new features and fixes, the major part for a release
 # big enough that you'd tell someone about it. Tag each release in git to match
 # (`git tag -a v2.0`), so an old version stays downloadable.
-__version__ = "2.0"
+__version__ = "2.1"
 
 # Which LLM provider to use for summaries: "openai", "tamu", or "none".
 # "none" skips all LLM calls (summary/title/keywords come back empty for you to
@@ -91,6 +91,11 @@ MAX_CHARS_FOR_SUMMARY = 12000
 # cost a lot of tokens for no extra insight, so shrink a COPY for the API call
 # while the saved file keeps its original resolution.
 MAX_IMAGE_EDGE_FOR_LLM = 1568
+
+# Ceiling on an image downloaded from a URL. A mistyped address can point at
+# something enormous, and unlike a file picker there's no dialog showing what
+# you're about to pull in — so the download stops rather than filling memory.
+MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +222,102 @@ def _extract_pdf(data: bytes, url: str) -> tuple[str, str]:
             "You can paste the text or enter a summary yourself below."
         )
     return title, text.strip()
+
+
+# The image formats the app stores. save_image() only trusts these extensions,
+# so the file picker's list and the URL fetcher's checks both derive from here
+# rather than repeating the set in three places that could drift apart.
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+# What a server's Content-Type maps to on disk, and what Pillow's detected
+# format maps to when the server doesn't say (or says something unhelpful like
+# application/octet-stream, which plenty of CDNs do).
+_CONTENT_TYPE_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+_PIL_FORMAT_EXTENSIONS = {
+    "PNG": ".png",
+    "JPEG": ".jpg",
+    "GIF": ".gif",
+    "WEBP": ".webp",
+}
+
+
+def _sniff_image_extension(data: bytes) -> str | None:
+    """The file extension for these bytes, judged by content — None if not an image.
+
+    Used when the server's Content-Type is missing or wrong. Pillow reads the
+    magic bytes, which is the only claim about a downloaded file worth
+    believing. Formats the app doesn't store (BMP, TIFF, SVG…) return None
+    rather than being saved under a lying .png extension.
+    """
+    try:
+        import io
+
+        from PIL import Image
+
+        return _PIL_FORMAT_EXTENSIONS.get(Image.open(io.BytesIO(data)).format or "")
+    except Exception:
+        return None
+
+
+def fetch_image(url: str) -> tuple[bytes, str]:
+    """Download an image from `url` and return (bytes, filename).
+
+    The mirror image of an upload: callers get exactly what a file picker gives
+    them, so saving and describing take the identical path from there on.
+
+    Raises ValueError with an explanation the user can act on — the common
+    mistake is pasting the address of the *page* containing an image rather than
+    the image itself, which is worth naming rather than reporting as a bad file.
+    """
+    url = _normalize_url(url.strip())
+    response = requests.get(url, headers=_BROWSER_HEADERS, timeout=30, stream=True)
+    response.raise_for_status()
+
+    declared = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    if declared.startswith("text/"):
+        raise ValueError(
+            "That address is a web page, not an image file. Right-click the "
+            "image itself and choose 'Copy Image Address', then paste that."
+        )
+
+    # Streamed with a running total, so an address that turns out to point at
+    # something huge is abandoned partway rather than after it's all in memory.
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=65536):
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > MAX_IMAGE_BYTES:
+            response.close()
+            raise ValueError(
+                f"That image is bigger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB, "
+                "so it wasn't downloaded."
+            )
+    data = b"".join(chunks)
+    if not data:
+        raise ValueError("That address returned an empty file.")
+
+    extension = _CONTENT_TYPE_EXTENSIONS.get(declared) or _sniff_image_extension(data)
+    if extension is None:
+        raise ValueError(
+            "That address didn't return a picture in a format Trailhead saves "
+            f"({', '.join(IMAGE_EXTENSIONS)}). Save it to your computer and "
+            "upload the file instead."
+        )
+
+    # Only the extension of this name is kept by save_image(), but the rest of
+    # it becomes the fallback title in the review form, so a real filename from
+    # the URL beats a generic one.
+    name = os.path.basename(url.split("?", 1)[0]) or "image"
+    if not name.lower().endswith(extension):
+        name = f"{os.path.splitext(name)[0] or 'image'}{extension}"
+    return data, name
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +560,7 @@ def save_image(data: bytes, original_name: str = "") -> str:
     keeps the database portable if the project folder moves.
     """
     extension = os.path.splitext(original_name)[1].lower()
-    if extension not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+    if extension not in IMAGE_EXTENSIONS:
         extension = ".png"
 
     os.makedirs(IMAGE_DIR, exist_ok=True)

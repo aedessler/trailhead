@@ -25,10 +25,19 @@ happens you can **type your own summary**, or **paste the page's text** and clic
 
 #### 🖼 Add an image
 Open **"Or add an image"** on the Add tab to save a figure, chart, or screenshot.
-Pick the file, optionally paste the **source link** it came from, then click
-**Describe & add image** — the LLM looks at the picture, writes a description of
-what it shows, and suggests a title and keywords. Review and edit them, then
-**💾 Save to library** just like a link.
+The **Image from** toggle chooses where it comes from:
+
+- **A file on this Mac** — pick a picture with the file chooser.
+- **A web address** — paste the address of the picture *itself* (right-click an
+  image in your browser and choose **Copy Image Address**; the address of the
+  page around it won't work). It previews as you paste, then gets downloaded and
+  saved into `images/` like any other, so you keep it even if the original goes
+  away. Leave **Source link** blank and that address becomes the entry's link.
+
+Optionally paste the **source link** it came from, then click **Describe & add
+image** — the LLM looks at the picture, writes a description of what it shows,
+and suggests a title and keywords. Review and edit them, then **💾 Save to
+library** just like a link.
 
 The description is what makes the image searchable: later you can find a figure
 by describing what's *in* it, without remembering the filename. Images show as
