@@ -14,6 +14,8 @@ pipeline from a plain terminal without launching the web UI. See the
 
 import base64
 import glob
+import hashlib
+import json
 import os
 import re
 import secrets
@@ -473,6 +475,60 @@ def image_path_for(filename: str | None) -> str | None:
     return full if os.path.exists(full) else None
 
 
+def _atomic_write(path: str, data: bytes) -> None:
+    """Write bytes so a reader never sees a half-finished file.
+
+    The data goes to a temporary neighbour and is then renamed into place;
+    os.replace is atomic within a filesystem. Without this, a crash or a full
+    disk partway through a backup copy would leave a truncated file that still
+    *looks* like a good backup — worse than having none.
+    """
+    temp = f"{path}.tmp"
+    with open(temp, "wb") as handle:
+        handle.write(data)
+    os.replace(temp, path)
+
+
+def _sha256(path: str) -> str:
+    """Hex SHA-256 of a file, read in chunks so a big image can't fill memory."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _image_names(folder: str) -> set[str]:
+    """Image filenames in a folder, ignoring dotfiles, temps, and the manifest.
+
+    A folder that doesn't exist gives an empty set rather than an error, which
+    is what makes a missing ./images or a missing backup mirror a harmless
+    no-op everywhere downstream instead of a special case in each caller.
+    """
+    try:
+        return {
+            name
+            for name in os.listdir(folder)
+            if not name.startswith(".")
+            and not name.endswith(".tmp")
+            and name != IMAGE_MANIFEST_NAME
+        }
+    except OSError:
+        return set()
+
+
+def _referenced_images() -> set[str]:
+    """Every image filename some entry still points at."""
+    with _connect() as conn:
+        return {
+            row["image_path"]
+            for row in conn.execute(
+                "SELECT image_path FROM entries WHERE image_path IS NOT NULL"
+            )
+            if row["image_path"]
+        }
+
+
 def unused_images() -> list[str]:
     """Image files in ./images that no entry refers to.
 
@@ -480,37 +536,54 @@ def unused_images() -> list[str]:
     delete_entry), so orphans build up over time. This finds them; removing
     them is a separate, explicit step.
     """
-    if not os.path.isdir(IMAGE_DIR):
-        return []
-    with _connect() as conn:
-        used = {
-            row["image_path"]
-            for row in conn.execute(
-                "SELECT image_path FROM entries WHERE image_path IS NOT NULL"
-            )
-        }
-    return sorted(
-        name for name in os.listdir(IMAGE_DIR)
-        if not name.startswith(".") and name not in used
-    )
+    return sorted(_image_names(IMAGE_DIR) - _referenced_images())
 
 
-def delete_unused_images() -> tuple[int, int]:
+def unused_backup_images() -> list[str]:
+    """Mirrored copies in ./backups/images that no entry refers to.
+
+    Listed separately from unused_images() because the two are cleaned on
+    different terms: clearing ./images is recoverable while the mirror still
+    holds the picture, but clearing the mirror is permanent.
+    """
+    return sorted(_image_names(IMAGE_BACKUP_DIR) - _referenced_images())
+
+
+def delete_unused_images(include_backups: bool = False) -> tuple[int, int]:
     """Delete every orphaned image file. Returns (files removed, bytes freed).
+
+    By default only ./images is cleared, so the pictures are still recoverable
+    from the backup mirror. Pass include_backups=True to remove the mirrored
+    copies as well — that one cannot be undone.
 
     Only ever call this on an explicit user request: an older database snapshot
     may still reference these files, so removing them can break a restore.
     """
     removed = freed = 0
-    for name in unused_images():
-        full = os.path.join(IMAGE_DIR, name)
+
+    def _drop(folder: str, name: str) -> None:
+        nonlocal removed, freed
+        full = os.path.join(folder, name)
         try:
             size = os.path.getsize(full)
             os.remove(full)
         except OSError:
-            continue  # already gone or not removable; skip it
+            return  # already gone or not removable; skip it
         removed += 1
         freed += size
+
+    for name in unused_images():
+        _drop(IMAGE_DIR, name)
+
+    if include_backups:
+        manifest = _load_manifest()
+        stale = unused_backup_images()
+        for name in stale:
+            _drop(IMAGE_BACKUP_DIR, name)
+            manifest.pop(name, None)
+        if stale:
+            _save_manifest(manifest)
+
     return removed, freed
 
 
@@ -541,6 +614,14 @@ def init_db() -> None:
 
 
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
+
+# Saved pictures are mirrored here. They can't live inside the .db snapshots
+# (that would make the every-launch backup copy the whole image library), so
+# they get their own append-only copy alongside them. The manifest records each
+# file's size and hash so damage — not just absence — can be detected.
+IMAGE_BACKUP_DIR = os.path.join(BACKUP_DIR, "images")
+IMAGE_MANIFEST_NAME = "manifest.json"
+IMAGE_MANIFEST_PATH = os.path.join(IMAGE_BACKUP_DIR, IMAGE_MANIFEST_NAME)
 
 
 def backup_database(keep: int = 5) -> str | None:
@@ -577,6 +658,184 @@ def backup_database(keep: int = 5) -> str | None:
             pass
 
     return dest
+
+
+def _load_manifest() -> dict:
+    """The image manifest: {filename: {"size": int, "sha256": str}}.
+
+    Returns {} when it's absent or unreadable. A damaged manifest must degrade
+    to "nothing can be verified", never to an error: it is only a helper for
+    checking the real files, and losing it must not stop the app from starting.
+    """
+    try:
+        with open(IMAGE_MANIFEST_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_manifest(manifest: dict) -> bool:
+    """Write the manifest atomically. False if it couldn't be written."""
+    try:
+        _atomic_write(
+            IMAGE_MANIFEST_PATH,
+            json.dumps(manifest, indent=1, sort_keys=True).encode("utf-8"),
+        )
+        return True
+    except OSError:
+        return False
+
+
+def backup_images() -> dict:
+    """Mirror ./images into ./backups/images, copying only what's new.
+
+    Image files are immutable — save_image() invents a unique name and never
+    overwrites one — so "a file of that name is already mirrored" is enough to
+    skip it. The usual launch therefore costs two directory listings and no
+    file reads at all.
+
+    This function ONLY copies; it never deletes from the mirror. That is the
+    load-bearing rule: a tool that *synced* the two folders would delete the
+    backup to match a lost or emptied ./images, destroying exactly what it
+    exists to protect. An absent mirror is likewise not an error — it is simply
+    rebuilt, since ./images is the source of truth and the mirror is derived.
+
+    Returns {"copied", "total", "failed"}.
+    """
+    live = _image_names(IMAGE_DIR)
+    mirrored = _image_names(IMAGE_BACKUP_DIR)
+    manifest = _load_manifest()
+
+    new = sorted(live - mirrored)
+    # Mirrored already but absent from the manifest, i.e. the manifest was lost
+    # or corrupted. Re-recording costs two hashes per file, so only redo the
+    # entries actually missing rather than rebuilding the whole thing.
+    unrecorded = sorted((live & mirrored) - set(manifest))
+
+    if not new and not unrecorded:
+        return {"copied": 0, "total": len(mirrored), "failed": []}
+
+    try:
+        os.makedirs(IMAGE_BACKUP_DIR, exist_ok=True)
+    except OSError:
+        return {"copied": 0, "total": len(mirrored), "failed": new + unrecorded}
+
+    copied, failed = 0, []
+    for name in new:
+        try:
+            with open(os.path.join(IMAGE_DIR, name), "rb") as handle:
+                data = handle.read()
+            _atomic_write(os.path.join(IMAGE_BACKUP_DIR, name), data)
+        except OSError:
+            failed.append(name)
+            continue
+        manifest[name] = {
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        copied += 1
+
+    for name in unrecorded:
+        # Only record a hash that can be justified. With no manifest to
+        # arbitrate, two copies that disagree mean one of them is damaged and
+        # there is no way to tell which — recording either would certify a
+        # corrupt file as good, which is worse than admitting we can't check it.
+        try:
+            live_file = os.path.join(IMAGE_DIR, name)
+            live_hash = _sha256(live_file)
+            if live_hash == _sha256(os.path.join(IMAGE_BACKUP_DIR, name)):
+                manifest[name] = {
+                    "size": os.path.getsize(live_file),
+                    "sha256": live_hash,
+                }
+        except OSError:
+            failed.append(name)
+
+    if not _save_manifest(manifest):
+        failed.append(IMAGE_MANIFEST_NAME)
+
+    return {"copied": copied, "total": len(mirrored) + copied, "failed": failed}
+
+
+def _matches(path: str, record: dict, deep: bool) -> bool:
+    """Does a file match its manifest record? Size always, contents when deep."""
+    try:
+        if os.path.getsize(path) != record.get("size"):
+            return False
+        return _sha256(path) == record.get("sha256") if deep else True
+    except OSError:
+        return False
+
+
+def _copy_into_place(src: str, dest: str) -> bool:
+    """Copy a mirrored image back into ./images. False if it can't be done."""
+    try:
+        with open(src, "rb") as handle:
+            data = handle.read()
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        _atomic_write(dest, data)
+        return True
+    except OSError:
+        return False
+
+
+def verify_images(deep: bool = False) -> dict:
+    """Check saved images against the backup mirror, repairing what it safely can.
+
+    deep=False (run at every launch) compares sizes only — stat calls, no
+    reading — which catches a truncated or zeroed file essentially for free.
+    deep=True (the Verify button) hashes every file, so it also catches damage
+    that happens to preserve the length.
+
+    Repairs happen only where the right answer is unambiguous: a file that is
+    missing from ./images but present in the mirror gets restored, and a file
+    whose contents disagree with the manifest is replaced when the mirrored
+    copy is the one the manifest describes. If both copies disagree with the
+    manifest, nothing is touched and the file is reported as damaged — silently
+    overwriting one unverified copy with another could destroy the good one.
+
+    Returns {"checked", "restored", "repaired", "damaged", "unverifiable"}.
+    """
+    manifest = _load_manifest()
+    referenced = _referenced_images()
+    result = {
+        "checked": 0,
+        "restored": [],
+        "repaired": [],
+        "damaged": [],
+        "unverifiable": [],
+    }
+
+    for name in sorted(referenced | set(manifest)):
+        result["checked"] += 1
+        live = os.path.join(IMAGE_DIR, name)
+        mirror = os.path.join(IMAGE_BACKUP_DIR, name)
+        record = manifest.get(name)
+
+        if not os.path.exists(live):
+            if name not in referenced:
+                # An orphan that a cleanup removed on purpose. Restoring it
+                # would undo the user's cleanup on the very next launch.
+                continue
+            if os.path.exists(mirror) and _copy_into_place(mirror, live):
+                result["restored"].append(name)
+            else:
+                result["damaged"].append(name)  # gone from both copies
+            continue
+
+        if not record:
+            result["unverifiable"].append(name)
+        elif not _matches(live, record, deep):
+            # Always hash the mirror before trusting it here: this overwrites a
+            # real file, so a size match alone isn't good enough.
+            if os.path.exists(mirror) and _matches(mirror, record, True) \
+                    and _copy_into_place(mirror, live):
+                result["repaired"].append(name)
+            else:
+                result["damaged"].append(name)
+
+    return result
 
 
 def add_entry(

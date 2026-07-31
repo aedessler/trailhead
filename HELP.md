@@ -104,15 +104,21 @@ Saved **images live in the `images/` folder**, not inside `library.db` — so th
 backup snapshots don't contain your pictures. Keep `images/` with the project
 when you move or copy it.
 
+**They are backed up too.** Every launch the app copies any new picture into
+`backups/images/` and checks the ones already there. If an image goes missing or
+its file is damaged, it's **put back from that copy automatically** and the
+Browse tab says so. The **🔍 Verify all images** button there runs a thorough
+check whenever you want one. This protects against an accidental delete or a
+damaged file; it is not a substitute for keeping a copy of the whole folder
+somewhere else.
+
 **Cleaning up `images/`:** deleting an entry leaves its image file behind on
-purpose, so that restoring an older snapshot always finds every picture it
-refers to. Those leftovers add up. When there are any, the top of the Browse tab
+purpose. Those leftovers add up, so when there are any the top of the Browse tab
 shows a **🧹 unused image file(s)** panel — open it, click **Clean up unused
-images**, and confirm. It only removes files that no entry still uses. One
-caveat: a backup made *before* you deleted those entries still refers to their
-images, so restoring it afterwards would show "image file missing" in their
-place. Old snapshots rotate out after 5 launches, so cleaning up a few sessions
-later avoids that entirely.
+images**, and confirm. By default this clears `images/` but keeps the backup
+copy, so the picture is still recoverable and restoring an older snapshot still
+finds it. Tick **Also delete the backup copies** to reclaim the space for good —
+that one can't be undone.
 
 > Searching and embeddings run **locally and free**. Only summaries, generated
 > titles, and keyword suggestions make an LLM call. For setup, providers, and

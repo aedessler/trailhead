@@ -26,32 +26,98 @@ HELP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HELP.md")
 core.init_db()
 
 
-# Back up the database once per app launch. @st.cache_resource caches the result
-# for the life of the process, so this runs once at startup, not on every rerun.
+# Back up and health-check the library once per app launch. @st.cache_resource
+# caches the result for the life of the process, so this runs once at startup,
+# not on every rerun.
 @st.cache_resource
-def _startup_backup():
-    return core.backup_database()
+def _startup_maintenance():
+    """Snapshot the database, mirror new images, then repair any damaged ones.
+
+    Images are mirrored *before* they're verified so the check always runs
+    against an up-to-date manifest — otherwise a mirror that was just rebuilt
+    would report its own files as unverifiable.
+    """
+    db_backup = core.backup_database()
+    images = core.backup_images()
+    health = core.verify_images(deep=False)
+    return {"db": db_backup, "images": images, "health": health}
 
 
-_last_backup_path = _startup_backup()
+_startup = _startup_maintenance()
+_last_backup_path = _startup["db"]
 
 
 def _render_entry_image(entry: dict, width: int = 360) -> None:
     """Show a saved entry's picture, if it has one.
 
-    A missing file must never raise: st.image on a bad path would break the
-    whole tab's render, and files can go missing for reasons outside the app's
-    control (the images folder wasn't copied along with the project, a manual
-    delete, a cleanup run). Say so quietly instead.
+    Nothing here may raise: st.image on a bad path or on damaged bytes would
+    break the whole tab's render, and a file can go missing or go bad for
+    reasons outside the app's control (the images folder wasn't copied along
+    with the project, a manual delete, a cleanup run, disk corruption). Say so
+    quietly instead — one unreadable picture must not cost you the library.
     """
     name = entry.get("image_path")
     if not name:
         return
     path = core.image_path_for(name)
-    if path:
-        st.image(path, width=width)
-    else:
+    if not path:
         st.caption(f"🖼 Image file missing ({name})")
+        return
+    try:
+        st.image(path, width=width)
+    except Exception:
+        st.caption(f"🖼 Image file unreadable ({name})")
+
+
+def _render_image_health() -> None:
+    """Backup-mirror status for the Browse tab: what's protected, what's hurt.
+
+    Repairs are reported rather than done silently — if the app had to put a
+    file back, you want to know the original was lost.
+    """
+    stats = _startup["images"]
+    deep = st.session_state.get("deep_scan")
+    health = deep or _startup["health"]
+
+    if not stats["total"] and not health["checked"]:
+        return  # no images saved yet — nothing to say
+
+    if stats["total"]:
+        line = f"🖼 {stats['total']} image(s) mirrored to backups/images/"
+        if stats["copied"]:
+            line += f" · {stats['copied']} added this session"
+        st.caption(line)
+
+    recovered = health["restored"] + health["repaired"]
+    if recovered:
+        st.success(
+            f"🛟 Recovered {len(recovered)} image(s) from the backup mirror: "
+            + ", ".join(recovered)
+        )
+    if health["damaged"]:
+        st.warning(
+            f"⚠️ {len(health['damaged'])} image(s) are missing or damaged and "
+            "the backup copy can't fix them: " + ", ".join(health["damaged"])
+        )
+    if stats["failed"]:
+        st.warning(
+            "⚠️ Couldn't write to backups/images, so these are not backed up: "
+            + ", ".join(stats["failed"])
+        )
+    # Only worth mentioning after an explicit scan: at launch it's usually just
+    # a file the manifest hasn't caught up with yet.
+    if deep and deep["unverifiable"]:
+        st.info(
+            f"{len(deep['unverifiable'])} image(s) have no recorded checksum to "
+            "check against: " + ", ".join(deep["unverifiable"])
+        )
+    if deep and not recovered and not deep["damaged"] and not deep["unverifiable"]:
+        st.success(f"✅ Verified {deep['checked']} image(s) — all match their backup.")
+
+    if st.button("🔍 Verify all images", key="verify_images"):
+        with st.spinner("Checking every image against its backup copy…"):
+            st.session_state["deep_scan"] = core.verify_images(deep=True)
+        st.rerun()
 
 
 def _vis_graph(entry_id: int) -> dict | None:
@@ -886,6 +952,8 @@ with browse_tab:
         import os as _os
         st.caption(f"🛟 Auto-backup this session: backups/{_os.path.basename(_last_backup_path)}")
 
+    _render_image_health()
+
     # Deleting an entry leaves its image file behind on purpose, so that
     # restoring an older database snapshot never lands on a missing picture.
     # This is the deliberate way to reclaim that space.
@@ -903,11 +971,25 @@ with browse_tab:
                 "restoring an older backup still finds every picture it refers "
                 "to — deleting them now can break those older restores."
             )
+            also_backups = st.checkbox(
+                "Also delete the backup copies in backups/images",
+                key="cleanup_backups_too",
+                help=(
+                    "Leave this off and the pictures stay recoverable from the "
+                    "backup mirror. Turn it on to free the space for good — "
+                    "that cannot be undone."
+                ),
+            )
             if st.session_state.get("confirm_image_cleanup"):
-                st.warning(f"Permanently delete {len(orphans)} file(s)?")
+                st.warning(
+                    f"Permanently delete {len(orphans)} file(s)"
+                    + (" and their backup copies?" if also_backups else "?")
+                )
                 yes_col, no_col = st.columns(2)
                 if yes_col.button("Yes, delete them", key="do_image_cleanup"):
-                    removed, freed = core.delete_unused_images()
+                    removed, freed = core.delete_unused_images(
+                        include_backups=also_backups
+                    )
                     st.session_state.pop("confirm_image_cleanup", None)
                     st.session_state["cleanup_note"] = (
                         f"Deleted {removed} file(s), freed "

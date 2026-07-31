@@ -232,15 +232,32 @@ doesn't expand, so the command would fail.)
   `library.db` small, so the every-launch backup stays fast. It also means the
   `.db` snapshots do *not* contain your pictures, so keep the `images/` folder
   with the project when you move or copy it.
+- **Images are mirrored into `backups/images/` on every launch.** Only files
+  that aren't already there get copied, so the usual launch costs nothing. A
+  `manifest.json` alongside them records each file's size and SHA-256.
+- **Damaged or missing pictures are repaired automatically.** Each launch checks
+  every image's size against that manifest; anything missing or the wrong size
+  is restored from the mirror and reported in the Browse tab. The **🔍 Verify
+  all images** button there does a full checksum pass on demand, which also
+  catches damage that happens to preserve the file's length. If both copies
+  disagree with the manifest, the app reports the file as damaged and changes
+  nothing rather than guessing which one is good.
+- The mirror is only ever added to, never trimmed to match `images/` — so an
+  emptied or lost `images/` folder is recovered from it instead of erasing it.
+  Deleting `backups/images/` is harmless; it rebuilds on the next launch.
 - **Deleting an entry leaves its image file in place.** That's deliberate: if
   deleting also erased the picture, restoring an older snapshot would bring
-  back entries whose images were gone. Leaving the file means any snapshot you
-  restore still finds every image it refers to. (If a file does go missing, the
-  app shows a small "image file missing" note rather than breaking.)
+  back entries whose images were gone. (If a file does go missing, the app shows
+  a small "image file missing" note rather than breaking.)
 - Those leftovers collect over time, so the Browse tab shows a **"unused image
-  file(s)"** panel with a cleanup button when there are any. Deleting them
-  frees the space but can break restores from older backups, so it always asks
-  first.
+  file(s)"** panel with a cleanup button when there are any. By default it
+  clears `images/` but keeps the mirrored copies, so the pictures stay
+  recoverable and older snapshots still restore correctly. A checkbox deletes
+  the backup copies too — that one is permanent, so it always asks first.
+- ⚠️ The mirror roughly **doubles the space images take** inside this folder,
+  and it sits on the same disk as the originals. It protects against an
+  accidental delete or a corrupted file, **not** against losing the drive or the
+  folder — keep a copy somewhere else for that.
 - ⚠️ Don't put the live `library.db` inside iCloud/Dropbox/Google Drive — cloud
   sync can corrupt a database that's being written to. It's fine to keep *copies*
   of backups in the cloud or on an external drive for off-machine safety.
@@ -255,7 +272,8 @@ doesn't expand, so the command would fail.)
 | `core.py` | The engine: fetch page, summarize, suggest title & keywords, embed, store/search/edit, map, back up. |
 | `library.db` | Your saved links (SQLite, created automatically). |
 | `images/` | Saved image files (created automatically; the database stores only their names). |
-| `backups/` | Timestamped database snapshots (created automatically; images are *not* included). |
+| `backups/` | Timestamped database snapshots (created automatically; images are *not* inside them). |
+| `backups/images/` | Mirrored copies of your image files, plus a `manifest.json` of sizes and checksums used to detect and repair damage. |
 | `requirements.txt` | The Python packages. |
 | `.env` | Your API key (keep confidential). |
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |
