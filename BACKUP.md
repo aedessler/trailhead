@@ -45,9 +45,5 @@ be undone.
 
 > ⚠️ The backup copies sit on the **same disk** as the originals. They protect
 > you from an accidental delete, a bad cleanup, or a corrupted file — **not**
-> from losing the drive or the folder. For that, keep a copy of the whole
-> Trailhead folder somewhere else.
-
-> ⚠️ Don't put the live `library.db` inside iCloud, Dropbox, or Google Drive —
-> cloud sync can corrupt a database while it's being written to. Keeping
-> *copies* of your backups in the cloud is fine, and is a good idea.
+> from losing the drive or the folder. Keeping the whole Trailhead folder in
+> iCloud, Dropbox, or Google Drive covers that.

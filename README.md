@@ -271,10 +271,11 @@ doesn't expand, so the command would fail.)
 - ⚠️ The mirror roughly **doubles the space images take** inside this folder,
   and it sits on the same disk as the originals. It protects against an
   accidental delete or a corrupted file, **not** against losing the drive or the
-  folder — keep a copy somewhere else for that.
-- ⚠️ Don't put the live `library.db` inside iCloud/Dropbox/Google Drive — cloud
-  sync can corrupt a database that's being written to. It's fine to keep *copies*
-  of backups in the cloud or on an external drive for off-machine safety.
+  folder — see the next bullet for that.
+- Keeping this folder in iCloud, Dropbox, or Google Drive is a good way to get
+  your library and its backups off the machine. (The Python environment is the
+  one thing that must stay out of a synced folder — see
+  [Why the Python environment lives outside this folder](#why-the-python-environment-lives-outside-this-folder).)
 
 ---
 
