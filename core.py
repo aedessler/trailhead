@@ -12,9 +12,11 @@ pipeline from a plain terminal without launching the web UI. See the
 `if __name__ == "__main__"` block at the bottom for a quick smoke test.
 """
 
+import base64
 import glob
 import os
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 
@@ -67,8 +69,18 @@ EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 # Where the SQLite database lives — next to this file, so it travels with the app.
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library.db")
 
+# Saved image files live beside the database, in their own folder. The database
+# stores only the FILENAME, so the whole project folder can be moved or renamed
+# without breaking anything.
+IMAGE_DIR = os.path.join(os.path.dirname(DB_PATH), "images")
+
 # Cap how much page text we send to the LLM, to stay fast and within limits.
 MAX_CHARS_FOR_SUMMARY = 12000
+
+# Longest edge (pixels) of the copy sent to the vision model. Big screenshots
+# cost a lot of tokens for no extra insight, so shrink a COPY for the API call
+# while the saved file keeps its original resolution.
+MAX_IMAGE_EDGE_FOR_LLM = 1568
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +264,79 @@ def summarize(text: str, model: str | None = None) -> str:
     return response.choices[0].message.content.strip()
 
 
+def _image_data_uri(data: bytes) -> str:
+    """Shrink an image and return it as a base64 data URI for the vision API.
+
+    Anything larger than MAX_IMAGE_EDGE_FOR_LLM is scaled down and re-encoded as
+    PNG; the caller's original bytes are untouched. If the image can't be parsed
+    (or Pillow is somehow unavailable) the original bytes are sent as-is, which
+    still works for normal-sized files.
+    """
+    mime = "image/png"
+    try:
+        import io
+
+        from PIL import Image  # ships with Streamlit; no extra dependency
+
+        img = Image.open(io.BytesIO(data))
+        if max(img.size) > MAX_IMAGE_EDGE_FOR_LLM:
+            img.thumbnail((MAX_IMAGE_EDGE_FOR_LLM, MAX_IMAGE_EDGE_FOR_LLM))
+        # Flatten transparency/palette modes onto white so PNG encoding is safe.
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        data = buffer.getvalue()
+    except Exception:
+        pass  # fall back to the bytes we were given
+
+    return f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+
+
+def summarize_image(data: bytes, model: str | None = None) -> str:
+    """Describe what an image shows, for later semantic search.
+
+    Takes the raw bytes of an image file and returns a few sentences describing
+    it. Both supported providers use vision-capable models, and both accept the
+    OpenAI-style "image_url" content block with a base64 data URI.
+    """
+    if LLM_PROVIDER == "none":
+        return ""  # no LLM configured — the user writes the description by hand
+    client = _get_llm_client()
+    if model is None:
+        _, model, _ = _provider_config()
+
+    response = client.chat.completions.create(
+        model=model,
+        stream=False,  # TAMU streams Claude models unless explicitly told not to
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You describe images so they can be found later by a "
+                    "semantic search. In 3-5 sentences, say what the image "
+                    "shows: the subject, the kind of figure (chart, map, "
+                    "photo, diagram, screenshot), what any axes or labels "
+                    "measure, and the main takeaway a reader would draw from "
+                    "it. Transcribe a title or caption if one is visible. Do "
+                    "not add preamble like 'This image'."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _image_data_uri(data)},
+                    },
+                ],
+            },
+        ],
+    )
+    return response.choices[0].message.content.strip()
+
+
 def suggest_title(text: str, model: str | None = None) -> str:
     """Ask the LLM for a short, descriptive title for the given text.
 
@@ -355,6 +440,80 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def save_image(data: bytes, original_name: str = "") -> str:
+    """Save image bytes into ./images and return the stored FILENAME.
+
+    The name is generated rather than taken from the upload: an uploaded name
+    could collide with an existing file or contain path separators. Only the
+    extension is borrowed from it. Returning a bare filename (not a full path)
+    keeps the database portable if the project folder moves.
+    """
+    extension = os.path.splitext(original_name)[1].lower()
+    if extension not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        extension = ".png"
+
+    os.makedirs(IMAGE_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"img-{stamp}-{secrets.token_hex(3)}{extension}"
+    with open(os.path.join(IMAGE_DIR, filename), "wb") as handle:
+        handle.write(data)
+    return filename
+
+
+def image_path_for(filename: str | None) -> str | None:
+    """Full path to a saved image, or None if it's missing/not set.
+
+    Callers use the None to show a placeholder instead of crashing: an image
+    file can go missing for reasons outside the app's control (the images folder
+    wasn't copied along with the project, a manual delete, a cleanup run).
+    """
+    if not filename:
+        return None
+    full = os.path.join(IMAGE_DIR, filename)
+    return full if os.path.exists(full) else None
+
+
+def unused_images() -> list[str]:
+    """Image files in ./images that no entry refers to.
+
+    Deleting an entry deliberately leaves its image file behind (see
+    delete_entry), so orphans build up over time. This finds them; removing
+    them is a separate, explicit step.
+    """
+    if not os.path.isdir(IMAGE_DIR):
+        return []
+    with _connect() as conn:
+        used = {
+            row["image_path"]
+            for row in conn.execute(
+                "SELECT image_path FROM entries WHERE image_path IS NOT NULL"
+            )
+        }
+    return sorted(
+        name for name in os.listdir(IMAGE_DIR)
+        if not name.startswith(".") and name not in used
+    )
+
+
+def delete_unused_images() -> tuple[int, int]:
+    """Delete every orphaned image file. Returns (files removed, bytes freed).
+
+    Only ever call this on an explicit user request: an older database snapshot
+    may still reference these files, so removing them can break a restore.
+    """
+    removed = freed = 0
+    for name in unused_images():
+        full = os.path.join(IMAGE_DIR, name)
+        try:
+            size = os.path.getsize(full)
+            os.remove(full)
+        except OSError:
+            continue  # already gone or not removable; skip it
+        removed += 1
+        freed += size
+    return removed, freed
+
+
 def init_db() -> None:
     """Create the entries table if it doesn't exist. Safe to call every run."""
     with _connect() as conn:
@@ -367,11 +526,18 @@ def init_db() -> None:
                 summary    TEXT,
                 notes      TEXT,
                 keywords   TEXT,
+                image_path TEXT,
                 embedding  BLOB,
                 created_at TEXT
             )
             """
         )
+        # CREATE TABLE IF NOT EXISTS won't touch a table that already exists, so
+        # libraries created before images were supported need the new column
+        # added explicitly. Checking first keeps this safe to run every launch.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
+        if "image_path" not in columns:
+            conn.execute("ALTER TABLE entries ADD COLUMN image_path TEXT")
 
 
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -419,9 +585,14 @@ def add_entry(
     summary: str,
     notes: str = "",
     keywords: str = "",
+    image_path: str | None = None,
 ) -> int:
     """Save one entry. The embedding is computed from summary + keywords + notes
     so that your own tags and notes also influence search results.
+
+    `image_path` is the filename returned by save_image() for a saved picture,
+    or None for an ordinary link. Because the embedding comes from the summary,
+    an image described by summarize_image() is searchable just like a page.
 
     Returns the new row's id.
     """
@@ -431,8 +602,9 @@ def add_entry(
     with _connect() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO entries (url, title, summary, notes, keywords, embedding, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entries
+                (url, title, summary, notes, keywords, image_path, embedding, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 url,
@@ -440,6 +612,7 @@ def add_entry(
                 summary,
                 notes,
                 keywords,
+                image_path,
                 vector.tobytes(),
                 datetime.now(timezone.utc).isoformat(),
             ),
@@ -451,7 +624,7 @@ def all_entries() -> list[dict]:
     """Return every saved entry (without the raw embedding), newest first."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "SELECT id, url, title, summary, notes, keywords, image_path, created_at "
             "FROM entries ORDER BY id DESC"
         ).fetchall()
     return [dict(row) for row in rows]
@@ -461,7 +634,7 @@ def get_entry(entry_id: int) -> dict | None:
     """Return one saved entry by id (without its raw embedding), if it exists."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "SELECT id, url, title, summary, notes, keywords, image_path, created_at "
             "FROM entries WHERE id = ?",
             (entry_id,),
         ).fetchone()
@@ -512,7 +685,7 @@ def get_entry_by_url(url: str) -> dict | None:
     """Return the saved entry with this exact URL, or None if it isn't saved."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "SELECT id, url, title, summary, notes, keywords, image_path, created_at "
             "FROM entries WHERE url = ?",
             (url,),
         ).fetchone()
@@ -520,6 +693,15 @@ def get_entry_by_url(url: str) -> dict | None:
 
 
 def delete_entry(entry_id: int) -> None:
+    """Delete an entry's row — but NOT its image file, on purpose.
+
+    Image files are append-only. The ./backups snapshots contain only the
+    database, so if deleting an entry also deleted its picture, restoring an
+    older snapshot would resurrect rows whose images no longer exist. Leaving
+    the file means any restored snapshot always finds every image it refers to.
+    The cost is orphaned files, which unused_images()/delete_unused_images()
+    clean up on an explicit request.
+    """
     with _connect() as conn:
         conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
 
@@ -650,8 +832,8 @@ def search(query: str, top_k: int = 5) -> list[dict]:
 
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, url, title, summary, notes, keywords, embedding, created_at "
-            "FROM entries"
+            "SELECT id, url, title, summary, notes, keywords, image_path, "
+            "embedding, created_at FROM entries"
         ).fetchall()
 
     if not rows:
@@ -716,7 +898,7 @@ def text_search(query: str) -> list[dict]:
 
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, url, title, summary, notes, keywords, created_at "
+            "SELECT id, url, title, summary, notes, keywords, image_path, created_at "
             "FROM entries ORDER BY id DESC"
         ).fetchall()
 

@@ -36,6 +36,24 @@ def _startup_backup():
 _last_backup_path = _startup_backup()
 
 
+def _render_entry_image(entry: dict, width: int = 360) -> None:
+    """Show a saved entry's picture, if it has one.
+
+    A missing file must never raise: st.image on a bad path would break the
+    whole tab's render, and files can go missing for reasons outside the app's
+    control (the images folder wasn't copied along with the project, a manual
+    delete, a cleanup run). Say so quietly instead.
+    """
+    name = entry.get("image_path")
+    if not name:
+        return
+    path = core.image_path_for(name)
+    if path:
+        st.image(path, width=width)
+    else:
+        st.caption(f"🖼 Image file missing ({name})")
+
+
 def _vis_graph(entry_id: int) -> dict | None:
     """One entry's neighborhood as vis.js node/edge dicts, or None if empty.
 
@@ -412,6 +430,66 @@ with entry_tab:
                     st.session_state.get("pending_round", 0) + 1
                 )
 
+    # Images take the same path as links: describe the picture, then hand the
+    # result to the shared review form below via `pending`. The description is
+    # what makes the image findable later, since the search embedding is built
+    # from the summary. The uploader's key includes entry_round so it clears
+    # itself after a save, like the URL box.
+    with st.expander("🖼 Or add an image (figure, chart, screenshot)"):
+        uploaded = st.file_uploader(
+            "Choose an image",
+            type=["png", "jpg", "jpeg", "gif", "webp"],
+            key=f"image_upload_{round_n}",
+        )
+        image_source = st.text_input(
+            "Source link (optional)",
+            key=f"image_source_{round_n}",
+            placeholder="https://... where this image came from",
+        )
+        if uploaded is not None:
+            st.image(uploaded, width=320)
+        if st.button("Describe & add image", type="primary", key=f"image_go_{round_n}"):
+            if uploaded is None:
+                st.warning("Choose an image first.")
+            else:
+                st.session_state.pop("edit_existing", None)
+                data = uploaded.getvalue()
+                stored_name = core.save_image(data, uploaded.name)
+                summary = ""
+                try:
+                    with st.spinner("Looking at the image..."):
+                        summary = core.summarize_image(data)
+                except Exception as exc:
+                    # Keep the upload: the file is already saved, so the user can
+                    # still write the description by hand instead of starting over.
+                    st.warning(
+                        f"Couldn't describe the image automatically ({exc}). "
+                        "You can write the description yourself below."
+                    )
+                title = ""
+                suggested = []
+                if summary:
+                    # Reuse the text helpers on the description — no second
+                    # vision call needed for a title or keywords.
+                    try:
+                        with st.spinner("Suggesting a title and keywords..."):
+                            title = core.suggest_title(summary)
+                            suggested = core.suggest_keywords(summary)
+                    except Exception:
+                        pass  # title/keywords are optional; the description matters
+                st.session_state["pending"] = {
+                    "url": image_source.strip(),
+                    "title": title or uploaded.name,
+                    "summary": summary,
+                    "manual": not summary,
+                    "suggested_keywords": suggested,
+                    "image_path": stored_name,
+                }
+                st.session_state["pending_round"] = (
+                    st.session_state.get("pending_round", 0) + 1
+                )
+                st.rerun()
+
     # If the entered URL is already saved, show an inline editor for that entry
     # instead of creating a duplicate.
     edit_existing = st.session_state.get("edit_existing")
@@ -462,47 +540,54 @@ with entry_tab:
         st.divider()
         pr = st.session_state.get("pending_round", 0)
 
+        # Show the picture being described, so the summary can be checked against it.
+        pending_image = core.image_path_for(pending.get("image_path"))
+        if pending_image:
+            st.image(pending_image, width=420)
+
         # After any fetch attempt, offer to (re)summarize text the user pastes in.
         # The automatic fetch can fail outright (manual=True), or "succeed" on a
         # bot-verification page (HTTP 200 with junk) — in both cases pasting the real
         # page text and re-summarizing fixes it. The original URL stays attached via
         # `pending`. The box + button live in a form so Cmd+Enter also submits.
-        with st.expander(
-            "📝 Page blocked or summary looks wrong? Paste the page's text to summarize"
-        ):
-            with st.form(f"paste_form_{pr}"):
-                pasted = st.text_area(
-                    "Paste page text here", key=f"paste_text_{pr}", height=200
-                )
-                paste_submitted = st.form_submit_button("Summarize pasted text")
-            if paste_submitted:
-                if not pasted.strip():
-                    st.warning("Paste some text first.")
-                else:
-                    ok = False
-                    try:
-                        with st.spinner("Summarizing..."):
-                            pending["summary"] = core.summarize(pasted.strip())
-                            pending["title"] = core.suggest_title(pasted.strip())
+        # (Pasting page text is meaningless for an image, so it's skipped there.)
+        if not pending.get("image_path"):
+            with st.expander(
+                "📝 Page blocked or summary looks wrong? Paste the page's text to summarize"
+            ):
+                with st.form(f"paste_form_{pr}"):
+                    pasted = st.text_area(
+                        "Paste page text here", key=f"paste_text_{pr}", height=200
+                    )
+                    paste_submitted = st.form_submit_button("Summarize pasted text")
+                if paste_submitted:
+                    if not pasted.strip():
+                        st.warning("Paste some text first.")
+                    else:
+                        ok = False
                         try:
-                            with st.spinner("Suggesting keywords..."):
-                                pending["suggested_keywords"] = core.suggest_keywords(
-                                    pending["summary"]
-                                )
-                        except Exception:
-                            pending["suggested_keywords"] = []
-                        ok = True
-                    except Exception as exc:
-                        st.error(f"Couldn't summarize the pasted text: {exc}")
-                    # Rerun OUTSIDE the try (st.rerun raises internally, which a broad
-                    # except would otherwise swallow). New round → Title/Summary boxes
-                    # re-init from the updated pending content.
-                    if ok:
-                        st.session_state["pending"] = pending
-                        st.session_state["pending_round"] = (
-                            st.session_state.get("pending_round", 0) + 1
-                        )
-                        st.rerun()
+                            with st.spinner("Summarizing..."):
+                                pending["summary"] = core.summarize(pasted.strip())
+                                pending["title"] = core.suggest_title(pasted.strip())
+                            try:
+                                with st.spinner("Suggesting keywords..."):
+                                    pending["suggested_keywords"] = core.suggest_keywords(
+                                        pending["summary"]
+                                    )
+                            except Exception:
+                                pending["suggested_keywords"] = []
+                            ok = True
+                        except Exception as exc:
+                            st.error(f"Couldn't summarize the pasted text: {exc}")
+                        # Rerun OUTSIDE the try (st.rerun raises internally, which a
+                        # broad except would otherwise swallow). New round →
+                        # Title/Summary boxes re-init from updated pending content.
+                        if ok:
+                            st.session_state["pending"] = pending
+                            st.session_state["pending_round"] = (
+                                st.session_state.get("pending_round", 0) + 1
+                            )
+                            st.rerun()
 
         if pending.get("manual"):
             st.caption("Or just write your own summary/notes below.")
@@ -561,6 +646,7 @@ with entry_tab:
                         summary=st.session_state.get(f"save_summary_{pr}", ""),
                         notes=st.session_state.get(f"save_notes_{pr}", ""),
                         keywords=st.session_state.get(f"save_kw_{pr}", ""),
+                        image_path=pending.get("image_path"),
                     )
                 # Clear everything (including the URL box) and rerun so the form
                 # is blank and ready for the next link without a page reload.
@@ -716,7 +802,13 @@ with search_tab:
                             st.rerun()
                     else:
                         # --- Read-only view ---
-                        st.markdown(f"**[{r['title']}]({r['url']})**")
+                        # An image saved without a source link has no URL, so
+                        # show a plain heading rather than an empty link.
+                        if r["url"]:
+                            st.markdown(f"**[{r['title']}]({r['url']})**")
+                        else:
+                            st.markdown(f"**{r['title']}**")
+                        _render_entry_image(r)
                         if "score" in r:
                             if r.get("keyword_match"):
                                 st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
@@ -794,6 +886,43 @@ with browse_tab:
         import os as _os
         st.caption(f"🛟 Auto-backup this session: backups/{_os.path.basename(_last_backup_path)}")
 
+    # Deleting an entry leaves its image file behind on purpose, so that
+    # restoring an older database snapshot never lands on a missing picture.
+    # This is the deliberate way to reclaim that space.
+    orphans = core.unused_images()
+    if orphans:
+        orphan_mb = sum(
+            os.path.getsize(os.path.join(core.IMAGE_DIR, n))
+            for n in orphans
+        ) / (1024 * 1024)
+        with st.expander(
+            f"🧹 {len(orphans)} unused image file(s) · {orphan_mb:.1f} MB"
+        ):
+            st.caption(
+                "Images left behind by deleted entries. They're kept so that "
+                "restoring an older backup still finds every picture it refers "
+                "to — deleting them now can break those older restores."
+            )
+            if st.session_state.get("confirm_image_cleanup"):
+                st.warning(f"Permanently delete {len(orphans)} file(s)?")
+                yes_col, no_col = st.columns(2)
+                if yes_col.button("Yes, delete them", key="do_image_cleanup"):
+                    removed, freed = core.delete_unused_images()
+                    st.session_state.pop("confirm_image_cleanup", None)
+                    st.session_state["cleanup_note"] = (
+                        f"Deleted {removed} file(s), freed "
+                        f"{freed / (1024 * 1024):.1f} MB."
+                    )
+                    st.rerun()
+                if no_col.button("Cancel", key="cancel_image_cleanup"):
+                    st.session_state.pop("confirm_image_cleanup", None)
+                    st.rerun()
+            elif st.button("Clean up unused images", key="ask_image_cleanup"):
+                st.session_state["confirm_image_cleanup"] = True
+                st.rerun()
+    if st.session_state.get("cleanup_note"):
+        st.success(st.session_state.pop("cleanup_note"))
+
     for e in entries:
         eid = e["id"]
         editing = st.session_state.get(f"editing_{eid}", False)
@@ -842,7 +971,9 @@ with browse_tab:
                     st.rerun()
             else:
                 # --- Read-only view ---
-                st.markdown(f"[Open link ↗]({e['url']})")
+                if e["url"]:
+                    st.markdown(f"[Open link ↗]({e['url']})")
+                _render_entry_image(e)
                 st.write(e["summary"])
                 if e["keywords"]:
                     st.caption(f"Keywords: {e['keywords']}")

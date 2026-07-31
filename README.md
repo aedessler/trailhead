@@ -4,8 +4,10 @@ Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
 and you **search** your library later by meaning (not just exact words) to
 rediscover what you saved — each summary a trailhead back into a source you
-explored. An interactive **🗺 map** shows how any link connects to its nearest
-neighbors, so you can also wander your library visually.
+explored. You can save **images** the same way — upload a figure or screenshot
+and the LLM describes what it shows, so it's findable by meaning too. An
+interactive **🗺 map** shows how any entry connects to its nearest neighbors,
+so you can also wander your library visually.
 
 It's written in Python with a browser-based UI (Streamlit) that you launch from 
 a double-click icon.
@@ -46,6 +48,19 @@ access** behind anti-bot protection — the app doesn't dead-end. The warning te
 you which case it is. You can **type your own summary**, or **paste the page's text** and
 click *Summarize pasted text* (or press **⌘+Enter** in the box) — the LLM then
 fills in the title, summary, and suggested keywords for you.
+
+#### 🖼 Adding an image
+
+Open **"Or add an image"** on the same tab to save a figure, chart, or
+screenshot instead of a page. Choose the file, optionally paste the **source
+link** it came from, and click **Describe & add image**: the LLM looks at the
+picture and writes a description of what it shows, then suggests a title and
+keywords. You review and edit all of it before saving, exactly as with a link.
+
+That description is what makes the image searchable — the search index is built
+from it, so later you can find a figure by describing its content rather than
+remembering its filename. The original file is copied into an `images/` folder
+next to the app; the database stores only its name.
 
 ### 🔎 Search
 
@@ -193,6 +208,10 @@ doesn't expand, so the command would fail.)
   funded account is required); TAMU AI is free for eligible university users.
   With `LLM_PROVIDER = "none"` there are **no LLM calls at all** (you write the
   summaries yourself).
+- Adding an **image** costs one vision call to describe it (plus the usual
+  cheap text calls for its title and keywords). A shrunken copy is sent for
+  that call, so a huge screenshot doesn't cost extra — your saved file keeps
+  its original resolution.
 - **Search and the 🗺 map are free** — they run on the local embedding model
   and the similarity scores already stored in your library, no API calls.
 - The **first** summary/search of a session takes a few extra seconds while the
@@ -209,6 +228,19 @@ doesn't expand, so the command would fail.)
   latest backup.
 - **To restore:** quit the app, copy the snapshot you want from `backups/` back
   into this folder, and rename it to `library.db` (replacing the current one).
+- **Saved images live in `images/`, not in the database** — that keeps
+  `library.db` small, so the every-launch backup stays fast. It also means the
+  `.db` snapshots do *not* contain your pictures, so keep the `images/` folder
+  with the project when you move or copy it.
+- **Deleting an entry leaves its image file in place.** That's deliberate: if
+  deleting also erased the picture, restoring an older snapshot would bring
+  back entries whose images were gone. Leaving the file means any snapshot you
+  restore still finds every image it refers to. (If a file does go missing, the
+  app shows a small "image file missing" note rather than breaking.)
+- Those leftovers collect over time, so the Browse tab shows a **"unused image
+  file(s)"** panel with a cleanup button when there are any. Deleting them
+  frees the space but can break restores from older backups, so it always asks
+  first.
 - ⚠️ Don't put the live `library.db` inside iCloud/Dropbox/Google Drive — cloud
   sync can corrupt a database that's being written to. It's fine to keep *copies*
   of backups in the cloud or on an external drive for off-machine safety.
@@ -222,7 +254,8 @@ doesn't expand, so the command would fail.)
 | `app.py` | The UI: the Add / Search / Browse / Help tabs and the 🗺 map. Presentation only. |
 | `core.py` | The engine: fetch page, summarize, suggest title & keywords, embed, store/search/edit, map, back up. |
 | `library.db` | Your saved links (SQLite, created automatically). |
-| `backups/` | Timestamped database snapshots (created automatically). |
+| `images/` | Saved image files (created automatically; the database stores only their names). |
+| `backups/` | Timestamped database snapshots (created automatically; images are *not* included). |
 | `requirements.txt` | The Python packages. |
 | `.env` | Your API key (keep confidential). |
 | `.streamlit/config.toml` | Streamlit settings (quiets startup logs). |
@@ -234,7 +267,8 @@ header set to get past naive bot filters; Google Drive share links are rewritten
 to their direct-download form first) and cleaned with `trafilatura` (PDFs are
 detected — by content type, extension, or `%PDF` magic bytes — and their text
 pulled with `pypdf`);
-summaries/keywords use the OpenAI-compatible chat API; semantic search uses
+summaries/keywords use the OpenAI-compatible chat API (image descriptions go
+through the same API, as a vision call); semantic search uses
 `sentence-transformers` (`all-MiniLM-L6-v2`) with cosine similarity computed in
 `numpy`; the relatedness map is drawn with `pyvis` (an interactive vis.js
 network embedded in the page).

@@ -23,6 +23,19 @@ happens you can **type your own summary**, or **paste the page's text** and clic
 
 ---
 
+#### 🖼 Add an image
+Open **"Or add an image"** on the Add tab to save a figure, chart, or screenshot.
+Pick the file, optionally paste the **source link** it came from, then click
+**Describe & add image** — the LLM looks at the picture, writes a description of
+what it shows, and suggests a title and keywords. Review and edit them, then
+**💾 Save to library** just like a link.
+
+The description is what makes the image searchable: later you can find a figure
+by describing what's *in* it, without remembering the filename. Images show as
+thumbnails in Search and Browse.
+
+---
+
 #### 🔎 Search
 Pick a mode with the **Search by** toggle:
 
