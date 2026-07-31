@@ -100,6 +100,20 @@ recent (the Browse tab shows this session's backup). To restore, quit the app,
 copy a snapshot from `backups/` back into the folder, and rename it to
 `library.db`.
 
+Saved **images live in the `images/` folder**, not inside `library.db` — so the
+backup snapshots don't contain your pictures. Keep `images/` with the project
+when you move or copy it.
+
+**Cleaning up `images/`:** deleting an entry leaves its image file behind on
+purpose, so that restoring an older snapshot always finds every picture it
+refers to. Those leftovers add up. When there are any, the top of the Browse tab
+shows a **🧹 unused image file(s)** panel — open it, click **Clean up unused
+images**, and confirm. It only removes files that no entry still uses. One
+caveat: a backup made *before* you deleted those entries still refers to their
+images, so restoring it afterwards would show "image file missing" in their
+place. Old snapshots rotate out after 5 launches, so cleaning up a few sessions
+later avoids that entirely.
+
 > Searching and embeddings run **locally and free**. Only summaries, generated
 > titles, and keyword suggestions make an LLM call. For setup, providers, and
 > troubleshooting, see the **README**.
