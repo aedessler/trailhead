@@ -41,6 +41,28 @@ picture stays recoverable and older snapshots still restore correctly. Tick
 **Also delete the backup copies** to reclaim the space for good — that one can't
 be undone.
 
+Do that a few times and `backups/images/` fills with copies that have nothing
+left to protect. **🗑 Clear N stale backup copy(s)**, beside the verify button,
+removes exactly those: mirrored files whose original is gone from `images/`
+*and* that no entry refers to. A picture an entry still needs is never touched,
+even when its original has vanished — that's the one case where a copy with no
+original is the mirror doing its job, and you'll see a warning about it instead.
+
+---
+
+#### 🧠 What built your search vectors
+
+Semantic search works by turning every entry into a list of numbers with a small
+model that runs on your Mac. Those numbers are only comparable with each other
+if the *same* model made all of them — two different models place the same text
+in different spots, so a library holding both would rank badly with nothing to
+show for it.
+
+So the library records which model built it, along with a fingerprint of that
+model's output, and checks both on every launch. Nothing appears unless they
+stop matching, in which case you get a warning at the top of the app. The fix is
+always the same: re-do every entry with the new model, or go back to the old one.
+
 ---
 
 > ⚠️ The backup copies sit on the **same disk** as the originals. They protect

@@ -1,6 +1,6 @@
 # 🧭 Trailhead
 
-**Version 2.1**
+**Version 2.1.1**
 
 Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
@@ -144,6 +144,13 @@ space. Click the map button on the entry again to hide the whole map.
 - Shows whether your saved images are mirrored and healthy, and reports anything
   the app restored or repaired at launch. **🔍 Verify all images** runs a full
   checksum pass on demand.
+- Beside it, **🗑 Clear N stale backup copy(s)** removes mirrored files whose
+  original is gone from `images/` *and* that no entry refers to — the residue of
+  earlier cleanups that kept the backup copy. A file an entry still needs is
+  never swept up, even with its original missing; that case is reported as a
+  warning instead, since the mirror is the only thing holding it.
+- Names the model that built your search vectors, and warns if it stops matching
+  the one in use (see **Versions** below for why that matters).
 - Holds the **🧹 unused image file(s)** cleanup panel, and the instructions for
   restoring a snapshot.
 - The explanatory text comes from **`BACKUP.md`** next to the app, the same way
@@ -449,12 +456,23 @@ git tag -a v2.2 -m "Trailhead 2.2" && git push origin v2.2
 ```
 
 GitHub builds a downloadable zip for every tag, so "send me version 2" is a
-link: `https://github.com/aedessler/trailhead/archive/refs/tags/v2.1.zip`.
+link: `https://github.com/aedessler/trailhead/archive/refs/tags/v2.1.1.zip`.
 
-Bump the **minor** part (2.0 → 2.1) for features and fixes, the **major** part
-for a release big enough that you'd tell someone about it. Version 2 is the one
-that added saved images, the backup mirror, and the Backup tab; 2.1 added saving
-an image straight from a web address.
+Bump the **minor** part (2.0 → 2.1) for a new feature, the **major** part for a
+release big enough that you'd tell someone about it, and add a **third** part
+(2.1 → 2.1.1) for fixes and tightening that don't change what the app does.
+Version 2 is the one that added saved images, the backup mirror, and the Backup
+tab; 2.1 added saving an image straight from a web address; 2.1.1 pinned the
+embedding model and made the library record which model built it.
+
+> **Why the embedding model is pinned.** Semantic search only works because
+> every entry was turned into numbers by the *same* model — two models place the
+> same text in different spots, so a library holding both ranks badly with
+> nothing to show for it. The app therefore loads the model from its local cache
+> and never checks Hugging Face for a newer one, and the database records the
+> model's name and a fingerprint of its output so a mismatch becomes a warning
+> instead of a silent decline. If you ever do switch models deliberately, every
+> entry has to be re-embedded — it's all or nothing.
 
 > Your `library.db` doesn't need a version of its own — `init_db()` checks the
 > table's columns on every launch and adds anything missing, so an older library

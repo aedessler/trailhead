@@ -144,10 +144,63 @@ def _render_image_health() -> None:
     if deep and not recovered and not deep["damaged"] and not deep["unverifiable"]:
         st.success(f"✅ Verified {deep['checked']} image(s) — all match their backup.")
 
-    if st.button("🔍 Verify all images", key="verify_images"):
+    # A picture an entry still needs, whose original is gone and which the
+    # launch repair couldn't put back. Said before the cleanup button, because
+    # it's the one case where a mirrored copy with no original must be kept.
+    stranded = core.stranded_backup_images()
+    if stranded:
+        st.warning(
+            f"⚠️ {len(stranded)} image(s) exist only as a backup copy and "
+            "couldn't be restored to images/: " + ", ".join(stranded) + ". "
+            "Entries still refer to them, so they're kept, not cleaned up."
+        )
+
+    leftovers = core.backup_only_images()
+    verify_col, clean_col = st.columns(2)
+
+    if verify_col.button("🔍 Verify all images", key="verify_images"):
         with st.spinner("Checking every image against its backup copy…"):
             st.session_state["deep_scan"] = core.verify_images(deep=True)
         st.rerun()
+
+    if leftovers:
+        # _human_size, not a bare MB figure: these files are often tens of KB,
+        # which "0.0 MB" would report as nothing at all.
+        reclaimable = _human_size(
+            sum(
+                os.path.getsize(os.path.join(core.IMAGE_BACKUP_DIR, n))
+                for n in leftovers
+            )
+        )
+        if clean_col.button(
+            f"🗑 Clear {len(leftovers)} stale backup copy(s)",
+            key="ask_backup_only_cleanup",
+            help=(
+                "Backup copies whose original is no longer in images/ and which "
+                "no entry refers to — usually left behind by an earlier cleanup "
+                f"that kept them. Frees {reclaimable}. Permanent: these are "
+                "the last copies."
+            ),
+        ):
+            st.session_state["confirm_backup_only"] = True
+            st.rerun()
+
+    if st.session_state.get("confirm_backup_only"):
+        st.warning(
+            f"Permanently delete {len(leftovers)} backup copy(s)? Nothing else "
+            "holds these pictures, so this can't be undone."
+        )
+        yes_col, no_col = st.columns(2)
+        if yes_col.button("Yes, delete them", key="do_backup_only_cleanup"):
+            removed, freed = core.delete_backup_only_images()
+            st.session_state.pop("confirm_backup_only", None)
+            st.session_state["cleanup_note"] = (
+                f"Deleted {removed} backup copy(s), freed {_human_size(freed)}."
+            )
+            st.rerun()
+        if no_col.button("Cancel", key="cancel_backup_only"):
+            st.session_state.pop("confirm_backup_only", None)
+            st.rerun()
 
 
 def _vis_graph(entry_id: int) -> dict | None:
@@ -436,6 +489,13 @@ def _render_related_links(entry_id: int, view: str) -> None:
 st.set_page_config(page_title="Trailhead", page_icon="🧭", layout="centered")
 st.title("🧭 Trailhead")
 st.caption(f"version {core.__version__}")
+
+# A model mismatch makes every search worse, not one tab's worth, so it belongs
+# above the tabs rather than buried in Backup. Silent unless something is
+# actually wrong — which is almost always.
+_embedding = core.embedding_health()
+if _embedding["problem"]:
+    st.warning(f"🧠 {_embedding['problem']['message']}")
 
 entry_tab, search_tab, browse_tab, backup_tab, help_tab = st.tabs(
     ["➕ Add a link", "🔎 Search", "📚 Browse all", "🛟 Backup", "❓ Help"]
@@ -1135,6 +1195,25 @@ with backup_tab:
     st.divider()
 
     _render_image_health()
+
+    st.divider()
+
+    # What built the search vectors. Shown even when healthy, because the value
+    # of the stamp is being able to see what your library is pinned to.
+    if _embedding["model"]:
+        st.markdown(
+            f"🧠 Search vectors built by **{_embedding['model']}**"
+            + (f" ({_embedding['dim']} numbers each)" if _embedding["dim"] else "")
+        )
+        if _embedding["problem"]:
+            st.warning(_embedding["problem"]["message"])
+        else:
+            st.caption(
+                "Recorded in the library itself and checked against the model "
+                "in use. Two models place the same text in different spots, so "
+                "mixing them would quietly spoil search — this is what makes "
+                "that visible instead of silent."
+            )
 
     # Deleting an entry leaves its image file behind on purpose, so that
     # restoring an older database snapshot never lands on a missing picture.

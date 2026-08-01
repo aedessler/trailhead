@@ -43,7 +43,7 @@ load_dotenv(override=True)
 # Bump the minor part for new features and fixes, the major part for a release
 # big enough that you'd tell someone about it. Tag each release in git to match
 # (`git tag -a v2.0`), so an old version stays downloadable.
-__version__ = "2.1"
+__version__ = "2.1.1"
 
 # Which LLM provider to use for summaries: "openai", "tamu", or "none".
 # "none" skips all LLM calls (summary/title/keywords come back empty for you to
@@ -73,7 +73,9 @@ def _provider_config() -> tuple[str, str, str]:
     )
 
 # Local embedding model. Small (~80 MB), runs offline, downloaded once on first
-# use and then cached by sentence-transformers under ~/.cache.
+# use and then cached by sentence-transformers under ~/.cache. Every later run
+# loads that cached copy and never contacts the network — see _get_embed_model()
+# for why that matters beyond speed.
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 # Where the SQLite database lives — next to this file, so it travels with the app.
@@ -528,7 +530,29 @@ def _get_embed_model():
         # ML import only happens when embeddings are actually needed.
         from sentence_transformers import SentenceTransformer
 
-        _embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+        # Load from the local cache and don't contact Hugging Face at all. The
+        # obvious reason is speed — the model is already on disk, so the network
+        # round-trip only ever confirmed that. The real reason is that every
+        # vector in library.db was produced by the cached copy: if a newer
+        # revision were ever published and quietly downloaded, new embeddings
+        # would land in a different vector space than the old ones and search
+        # would degrade with no error to explain it. Pinning to what's cached
+        # keeps the whole library comparable.
+        #
+        # The fallback covers the one case where there's nothing to load from:
+        # a first run (or a cleared cache), where the model does need fetching.
+        try:
+            _embed_model = SentenceTransformer(EMBED_MODEL_NAME, local_files_only=True)
+        except Exception:
+            _embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+
+        # Now that it's loaded, fingerprinting it is nearly free. Wrapped
+        # because this is a diagnostic: one that could stop you searching would
+        # be worse than not having it.
+        try:
+            _fingerprint_model(_embed_model)
+        except Exception:
+            pass
     return _embed_model
 
 
@@ -538,6 +562,164 @@ def embed(text: str) -> np.ndarray:
     # normalize_embeddings=True makes cosine similarity == a simple dot product.
     vector = model.encode(text, normalize_embeddings=True)
     return np.asarray(vector, dtype=np.float32)
+
+
+# ---------------------------------------------------------------------------
+# 3b. The embedding-model stamp
+# ---------------------------------------------------------------------------
+#
+# A stored vector is a bare list of floats: nothing in it records which model
+# produced it. That matters because two models put the same text in different
+# places, so mixing vintages inside one library makes search quietly worse with
+# no error to explain it. Swapping to a model of a *different* width at least
+# crashes when the vectors are stacked; a retrained model of the same width
+# doesn't even do that. So the library records what built its vectors, and the
+# app checks that record against the model in use.
+
+# A fixed sentence pushed through the model to fingerprint it. Comparing the
+# name alone would miss the dangerous case — same name, retrained weights —
+# because only the output reveals that.
+EMBED_PROBE_TEXT = "Trailhead identifies its embedding model with this sentence."
+
+# Cosine similarity at or above this counts as the same model. Deliberately not
+# an equality test: the same model on a different Mac, or under a newer torch,
+# can differ in the last few bits, and that must not read as a model change. A
+# genuinely different model lands nowhere near this.
+_PROBE_MATCH_FLOOR = 0.999
+
+# Filled in the first time the model is loaded in this process; read by
+# embedding_health(), which is called far too often to load a model itself.
+_probe_verdict: dict | None = None
+
+
+def _meta_get(conn: sqlite3.Connection, key: str) -> bytes | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def _meta_set(conn: sqlite3.Connection, key: str, value: bytes) -> None:
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def _stored_dim(conn: sqlite3.Connection) -> int | None:
+    """How wide the vectors in the table actually are, from one blob's length.
+
+    Reads a length rather than a vector, so this stays cheap enough to call on
+    every launch, and it reports the truth on disk rather than what the stamp
+    claims — which is the whole point of having something to compare.
+    """
+    row = conn.execute(
+        "SELECT LENGTH(embedding) AS n FROM entries "
+        "WHERE embedding IS NOT NULL LIMIT 1"
+    ).fetchone()
+    return row["n"] // 4 if row and row["n"] else None
+
+
+def _fingerprint_model(model) -> None:
+    """Record the loaded model's fingerprint, or check it against the stored one.
+
+    Called once per process, right after the model loads, because that's when a
+    probe costs a few milliseconds instead of a five-second model load. A
+    library with no fingerprint yet gets one written here.
+
+    Nothing in here may raise: this is a diagnostic, and a diagnostic that can
+    break searching is worse than no diagnostic at all.
+    """
+    global _probe_verdict
+    with _connect() as conn:
+        stored_text = _meta_get(conn, "embed_probe_text")
+        stored = _meta_get(conn, "embed_probe")
+
+        # Re-embed the sentence that was STORED, not the current constant, so
+        # that editing EMBED_PROBE_TEXT later can't make every existing library
+        # look as though its model changed.
+        text = stored_text.decode() if stored_text else EMBED_PROBE_TEXT
+        vector = np.asarray(
+            model.encode(text, normalize_embeddings=True), dtype=np.float32
+        )
+
+        if stored is None:
+            _meta_set(conn, "embed_probe_text", text.encode())
+            _meta_set(conn, "embed_probe", vector.tobytes())
+            _meta_set(conn, "embed_dim", str(int(vector.shape[0])).encode())
+            _meta_set(conn, "embed_model", EMBED_MODEL_NAME.encode())
+            return
+
+        previous = np.frombuffer(stored, dtype=np.float32)
+        if previous.shape != vector.shape:
+            _probe_verdict = {
+                "kind": "dimension",
+                "message": (
+                    f"The model in use produces {vector.shape[0]}-number vectors, "
+                    f"but this library's are {previous.shape[0]}. Searching will "
+                    "fail outright until every entry is re-embedded."
+                ),
+            }
+            return
+
+        similarity = float(previous @ vector)
+        if similarity < _PROBE_MATCH_FLOOR:
+            _probe_verdict = {
+                "kind": "weights",
+                "message": (
+                    f"'{EMBED_MODEL_NAME}' still has its old name but no longer "
+                    "produces the vectors this library was built with, so it has "
+                    "been retrained or replaced. Search still runs, but entries "
+                    "saved before now rank badly. Re-embed every entry to fix it."
+                ),
+            }
+
+
+def embedding_health() -> dict:
+    """What built this library's vectors, and whether that still matches.
+
+    Cheap by design — it reads the stamp and one blob length, never a model —
+    so the app can call it on every rerun. The retrained-weights case can only
+    be judged once the model has actually been loaded, so it appears here after
+    the first search or save rather than at launch.
+    """
+    with _connect() as conn:
+        model = _meta_get(conn, "embed_model")
+        dim = _meta_get(conn, "embed_dim")
+        (entries,) = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
+        actual = _stored_dim(conn)
+
+    model = model.decode() if model else None
+    dim = int(dim) if dim else None
+
+    problem = None
+    if model and model != EMBED_MODEL_NAME:
+        problem = {
+            "kind": "model",
+            "message": (
+                f"This library's search vectors were built by '{model}', but the "
+                f"app is set to '{EMBED_MODEL_NAME}'. Entries saved from now on "
+                "won't be comparable with the older ones. Either set "
+                "EMBED_MODEL_NAME back, or re-embed every entry."
+            ),
+        }
+    elif dim and actual and dim != actual:
+        problem = {
+            "kind": "dimension",
+            "message": (
+                f"This library's stamp says {dim}-number vectors but the stored "
+                f"ones are {actual}. Search will fail until every entry is "
+                "re-embedded."
+            ),
+        }
+    elif _probe_verdict:
+        problem = _probe_verdict
+
+    return {
+        "model": model,
+        "dim": dim or actual,
+        "entries": entries,
+        "problem": problem,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +840,73 @@ def unused_backup_images() -> list[str]:
     return sorted(_image_names(IMAGE_BACKUP_DIR) - _referenced_images())
 
 
+def backup_only_images() -> list[str]:
+    """Mirrored copies whose original is gone from ./images AND that no entry
+    refers to.
+
+    "In the mirror but not in ./images" on its own is NOT a safe thing to
+    delete — that set also contains any picture an entry still needs whose
+    original went missing, which is the exact case the mirror exists to survive.
+    Requiring the file to be unreferenced as well removes that risk: nothing
+    points at these, and no original is left for them to protect. See
+    stranded_backup_images() for the ones deliberately excluded.
+    """
+    return sorted(
+        _image_names(IMAGE_BACKUP_DIR) - _image_names(IMAGE_DIR) - _referenced_images()
+    )
+
+
+def stranded_backup_images() -> list[str]:
+    """Mirrored copies of pictures that entries still need but ./images has lost.
+
+    These are the mirror doing its job, and they must never be swept up by a
+    cleanup. Seeing any is a symptom rather than a chore: verify_images() puts
+    referenced files back on every launch, so a file staying stranded means that
+    restore couldn't happen — a damaged mirror copy, a full disk, or a folder
+    that can't be written to.
+    """
+    return sorted(
+        (_image_names(IMAGE_BACKUP_DIR) - _image_names(IMAGE_DIR))
+        & _referenced_images()
+    )
+
+
+def _remove_image(folder: str, name: str) -> int | None:
+    """Delete one image file. Returns the bytes freed, or None if it couldn't be.
+
+    Returns None rather than 0 for failure so that a legitimately empty file
+    still counts as removed.
+    """
+    full = os.path.join(folder, name)
+    try:
+        size = os.path.getsize(full)
+        os.remove(full)
+    except OSError:
+        return None  # already gone or not removable; skip it
+    return size
+
+
+def delete_backup_only_images() -> tuple[int, int]:
+    """Delete the mirrored copies that no original and no entry needs.
+
+    Returns (files removed, bytes freed). Permanent — these are last copies, so
+    only ever call it on an explicit user request. The manifest entry goes with
+    each file, so the next launch doesn't look for something deliberately gone.
+    """
+    manifest = _load_manifest()
+    removed = freed = 0
+    names = backup_only_images()
+    for name in names:
+        size = _remove_image(IMAGE_BACKUP_DIR, name)
+        if size is not None:
+            removed += 1
+            freed += size
+            manifest.pop(name, None)
+    if removed:
+        _save_manifest(manifest)
+    return removed, freed
+
+
 def delete_unused_images(include_backups: bool = False) -> tuple[int, int]:
     """Delete every orphaned image file. Returns (files removed, bytes freed).
 
@@ -672,14 +921,10 @@ def delete_unused_images(include_backups: bool = False) -> tuple[int, int]:
 
     def _drop(folder: str, name: str) -> None:
         nonlocal removed, freed
-        full = os.path.join(folder, name)
-        try:
-            size = os.path.getsize(full)
-            os.remove(full)
-        except OSError:
-            return  # already gone or not removable; skip it
-        removed += 1
-        freed += size
+        size = _remove_image(folder, name)
+        if size is not None:
+            removed += 1
+            freed += size
 
     for name in unused_images():
         _drop(IMAGE_DIR, name)
@@ -720,6 +965,22 @@ def init_db() -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
         if "image_path" not in columns:
             conn.execute("ALTER TABLE entries ADD COLUMN image_path TEXT")
+
+        # Facts about the library itself rather than any one entry — currently
+        # which model built its search vectors. See the embedding-model stamp
+        # section for why that's worth recording.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB)"
+        )
+        # A library written before stamping has vectors with no record of what
+        # made them. The model configured right now is the only defensible
+        # guess — nothing else is knowable after the fact — so write that, and
+        # let the fingerprint fill itself in the first time the model loads.
+        if _meta_get(conn, "embed_model") is None:
+            _meta_set(conn, "embed_model", EMBED_MODEL_NAME.encode())
+            existing = _stored_dim(conn)
+            if existing:
+                _meta_set(conn, "embed_dim", str(existing).encode())
 
 
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
