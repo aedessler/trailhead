@@ -52,14 +52,18 @@ _startup = _startup_maintenance()
 _last_backup_path = _startup["db"]
 
 
-def _render_entry_image(entry: dict, width: int = 360) -> None:
-    """Show a saved entry's picture, if it has one.
+def _render_entry_image(entry: dict, key_prefix: str, width: int = 360) -> None:
+    """Show a saved entry's picture, if it has one, and offer to open the file.
 
     Nothing here may raise: st.image on a bad path or on damaged bytes would
     break the whole tab's render, and a file can go missing or go bad for
     reasons outside the app's control (the images folder wasn't copied along
     with the project, a manual delete, a cleanup run, disk corruption). Say so
     quietly instead — one unreadable picture must not cost you the library.
+
+    key_prefix names the tab doing the drawing and is not optional: Streamlit
+    draws every tab on every run, so an entry showing up in both Search and
+    Browse would otherwise ask for the same widget key twice and error out.
     """
     name = entry.get("image_path")
     if not name:
@@ -72,6 +76,25 @@ def _render_entry_image(entry: dict, width: int = 360) -> None:
         st.image(path, width=width)
     except Exception:
         st.caption(f"🖼 Image file unreadable ({name})")
+        return
+
+    # The copy in the card is shrunk to fit it. This opens the real file in the
+    # Mac's own image viewer, which is where you can see it at full size, zoom
+    # into the axis labels of a figure, or pass it on to something else — none
+    # of which the thumbnail can do.
+    open_clicked = st.button(
+        "🖥 Open on this Mac", key=f"{key_prefix}_openimg_{entry['id']}"
+    )
+    # The outcome goes into a slot claimed on every run, even when there's
+    # nothing to report, so that saying it doesn't shove the rest of the card
+    # down a line for the one run in which it's said.
+    open_msg = st.empty()
+    if open_clicked:
+        problem = core.open_image_externally(name)
+        if problem:
+            open_msg.warning(problem)
+        else:
+            open_msg.caption(f"🖥 Opened {name} in your image viewer.")
 
 
 def _human_size(num_bytes: int) -> str:
@@ -428,6 +451,46 @@ def _render_map(entry_id: int) -> None:
     )
 
 
+def _forget_search_result(entry_id: int) -> None:
+    """Drop a deleted entry from everything the Search tab is holding.
+
+    Browse can delete and simply rerun, because it re-reads the library every
+    time it draws. Search can't: its results are a snapshot kept in session
+    state, so without this the deleted entry's card would stay on screen still
+    offering Edit and Map on a row that no longer exists. The Back stack holds
+    older snapshots for the same reason, so it has to be cleaned too, or
+    stepping back would resurrect the card.
+    """
+    results = st.session_state.get("search_results")
+    if results is not None:
+        st.session_state["search_results"] = [
+            r for r in results if r["id"] != entry_id
+        ]
+
+    history = st.session_state.get("search_nav_history")
+    if history:
+        # A frame emptied by the delete is dropped rather than kept as a step
+        # back to nothing.
+        pruned = []
+        for frame in history:
+            kept = [r for r in frame["results"] if r["id"] != entry_id]
+            if kept:
+                pruned.append({**frame, "results": kept})
+        if pruned:
+            st.session_state["search_nav_history"] = pruned
+        else:
+            st.session_state.pop("search_nav_history", None)
+
+    # Per-entry widget state would otherwise be waiting for the id if a later
+    # search turned up an entry that reused it.
+    for key in (
+        f"sediting_{entry_id}", f"sedit_title_{entry_id}", f"sedit_url_{entry_id}",
+        f"sedit_summary_{entry_id}", f"sedit_kw_{entry_id}",
+        f"sedit_notes_{entry_id}", f"smap_{entry_id}",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _open_related_entry(entry_id: int, view: str, parent_id: int) -> bool:
     """Navigate to a related saved entry inside Search or Browse.
 
@@ -509,9 +572,16 @@ entry_tab, search_tab, browse_tab, backup_tab, help_tab = st.tabs(
 with entry_tab:
     st.subheader("Add a link")
 
-    # Show a one-time confirmation after a save cleared the form.
+    # Show a one-time confirmation after a save cleared the form. It goes into a
+    # slot that is claimed on every run, even when there's nothing to say: an
+    # element that appears and disappears shifts everything below it into
+    # different positions from one run to the next, and Streamlit keeps the
+    # previous run's copy on screen (greyed out) until the new run finishes
+    # drawing. During a fetch that's several seconds of a phantom second URL box
+    # sitting under the real one.
+    saved_slot = st.empty()
     if st.session_state.pop("just_saved", False):
-        st.success("Saved!")
+        saved_slot.success("Saved!")
 
     # The URL box lives in a form so pressing Enter triggers Fetch & Summarize.
     # Text inputs inside a form can't be reliably cleared by deleting their
@@ -524,9 +594,17 @@ with entry_tab:
         )
         fetch_clicked = st.form_submit_button("Fetch & Summarize", type="primary")
 
+    # Anything the fetch attempt has to say goes in a slot claimed on every run,
+    # for the same reason as saved_slot above. This one matters more: the
+    # "couldn't read this page" warning shows up only in the run that failed, so
+    # without a reserved slot everything below it — including the paste-the-text
+    # expander the warning is telling you to use — sits one position higher on
+    # the next run and leaves a phantom copy behind while the summarizer works.
+    fetch_msg = st.empty()
+
     if fetch_clicked:
         if not url.strip():
-            st.warning("Please paste a URL first.")
+            fetch_msg.warning("Please paste a URL first.")
         elif core.get_entry_by_url(url.strip()):
             # Already saved — open it for editing instead of fetching a duplicate.
             st.session_state["edit_existing"] = core.get_entry_by_url(url.strip())
@@ -572,7 +650,7 @@ with entry_tab:
                     )
                 else:
                     reason = "it may need JavaScript to load"
-                st.warning(
+                fetch_msg.warning(
                     f"Couldn't automatically read this page ({exc}) — {reason}. "
                     "You can enter the details yourself below, or paste the page's "
                     "text and have it summarized."
@@ -1012,7 +1090,7 @@ with search_tab:
                             st.markdown(f"**[{r['title']}]({r['url']})**")
                         else:
                             st.markdown(f"**{r['title']}**")
-                        _render_entry_image(r)
+                        _render_entry_image(r, "search")
                         if "score" in r:
                             if r.get("keyword_match"):
                                 st.caption(f"🏷 keyword match · similarity: {r['score']:.0%}")
@@ -1022,7 +1100,7 @@ with search_tab:
                         if r["keywords"]:
                             st.caption(f"Keywords: {r['keywords']}")
 
-                        edit_col, map_col = st.columns(2)
+                        edit_col, map_col, del_col = st.columns(3)
                         if edit_col.button("✏️ Edit", key=f"sedit_{rid}"):
                             st.session_state[f"sediting_{rid}"] = True
                             st.rerun()
@@ -1032,6 +1110,12 @@ with search_tab:
                             key=f"smapbtn_{rid}",
                         ):
                             st.session_state[f"smap_{rid}"] = not map_on
+                            st.rerun()
+                        # Key prefixed "sdel" so it can't collide with the same
+                        # entry's Delete button over in Browse.
+                        if del_col.button("🗑 Delete", key=f"sdel_{rid}"):
+                            core.delete_entry(rid)
+                            _forget_search_result(rid)
                             st.rerun()
                         if map_on:
                             _render_map(rid)
@@ -1137,7 +1221,7 @@ with browse_tab:
                 # --- Read-only view ---
                 if e["url"]:
                     st.markdown(f"[Open link ↗]({e['url']})")
-                _render_entry_image(e)
+                _render_entry_image(e, "browse")
                 st.write(e["summary"])
                 if e["keywords"]:
                     st.caption(f"Keywords: {e['keywords']}")

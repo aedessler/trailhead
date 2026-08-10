@@ -41,7 +41,9 @@ library** just like a link.
 
 The description is what makes the image searchable: later you can find a figure
 by describing what's *in* it, without remembering the filename. Images show as
-thumbnails in Search and Browse.
+thumbnails in Search and Browse, each with a **🖥 Open on this Mac** button that
+opens the actual file in Preview — for when the thumbnail is too small to read
+the axis labels, or you want to copy the picture into something else.
 
 ---
 

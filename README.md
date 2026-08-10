@@ -1,6 +1,6 @@
 # 🧭 Trailhead
 
-**Version 2.1.1**
+**Version 2.1.2**
 
 Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
@@ -78,6 +78,14 @@ next to the app; the database stores only its name.
 Pasting the address of a *page* rather than an image gets a message saying so.
 Formats Trailhead doesn't store (SVG, TIFF, BMP) are refused rather than saved
 under a misleading name, and a download is abandoned past 25 MB.
+
+Saved images appear as thumbnails wherever the entry does, in both Search and
+Browse, with a **🖥 Open on this Mac** button underneath. That hands the real
+file to Preview, so you can see it full size, zoom into a figure's axis labels,
+or copy it into something else — the things a thumbnail scaled to fit a card
+can't do. It works because the app and the browser window showing it are the
+same computer; if you ever served Trailhead to another machine, the picture
+would open on the machine running the app rather than on yours.
 
 ### 🔎 Search
 
@@ -463,7 +471,9 @@ release big enough that you'd tell someone about it, and add a **third** part
 (2.1 → 2.1.1) for fixes and tightening that don't change what the app does.
 Version 2 is the one that added saved images, the backup mirror, and the Backup
 tab; 2.1 added saving an image straight from a web address; 2.1.1 pinned the
-embedding model and made the library record which model built it.
+embedding model and made the library record which model built it; 2.1.2 added
+opening a saved image in Preview and deleting an entry from a search result,
+and stopped the Add tab's messages from shifting the page as they come and go.
 
 > **Why the embedding model is pinned.** Semantic search only works because
 > every entry was turned into numbers by the *same* model — two models place the

@@ -20,6 +20,8 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
@@ -43,7 +45,7 @@ load_dotenv(override=True)
 # Bump the minor part for new features and fixes, the major part for a release
 # big enough that you'd tell someone about it. Tag each release in git to match
 # (`git tag -a v2.0`), so an old version stays downloadable.
-__version__ = "2.1.1"
+__version__ = "2.1.2"
 
 # Which LLM provider to use for summaries: "openai", "tamu", or "none".
 # "none" skips all LLM calls (summary/title/keywords come back empty for you to
@@ -764,6 +766,61 @@ def image_path_for(filename: str | None) -> str | None:
         return None
     full = os.path.join(IMAGE_DIR, filename)
     return full if os.path.exists(full) else None
+
+
+def open_image_externally(filename: str | None) -> str | None:
+    """Hand a saved image to the computer's own viewer (Preview on a Mac).
+
+    Returns None once the viewer has been launched, or a short sentence saying
+    why it couldn't be — nothing here raises, because failing to open a picture
+    must not cost you the tab you were reading.
+
+    This works because the app and the browser window showing it are the same
+    computer, which is how Trailhead is meant to be run. If you ever serve it to
+    another machine, the picture opens on the machine running the app, not on
+    the one you're sitting at.
+    """
+    if not filename:
+        return "There's no image on that entry."
+    path = image_path_for(filename)
+    if not path:
+        return f"That image file is no longer in images/ ({filename})."
+
+    # The path is about to be handed to the operating system, so confirm it
+    # really is one of our own files first. save_image() only ever generates
+    # names that sit directly in images/, but the name travels through the
+    # database, and a row that arrived some other way (a hand-edited library, a
+    # merge from elsewhere) could point outside the folder — in which case this
+    # would obligingly open whatever it found there.
+    resolved = os.path.realpath(path)
+    if os.path.dirname(resolved) != os.path.realpath(IMAGE_DIR):
+        return "That file isn't inside the images/ folder, so it wasn't opened."
+
+    if sys.platform == "darwin":
+        command = ["open", resolved]
+    elif os.name == "nt":
+        try:
+            os.startfile(resolved)  # type: ignore[attr-defined]  # Windows only
+        except OSError as exc:
+            return f"The computer wouldn't open it ({exc})."
+        return None
+    else:
+        command = ["xdg-open", resolved]
+
+    # No shell is involved (the command is a list), so a filename can't turn
+    # into anything executable. The timeout is a backstop: these launchers hand
+    # off to the viewer and exit immediately, so one that hasn't returned in ten
+    # seconds is stuck, and waiting on it would freeze the app for everyone.
+    try:
+        subprocess.run(command, check=True, capture_output=True, timeout=10)
+    except FileNotFoundError:
+        return f"This computer has no '{command[0]}' command, so it wasn't opened."
+    except subprocess.TimeoutExpired:
+        return "The image viewer didn't respond, so it may not have opened."
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or b"").decode(errors="replace").strip()
+        return f"The computer wouldn't open it{f' ({detail})' if detail else ''}."
+    return None
 
 
 def _atomic_write(path: str, data: bytes) -> None:
