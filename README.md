@@ -98,12 +98,15 @@ picks how matching works:
 - Pages whose **keywords match your search term are pushed to the top** and
   labeled `🏷 keyword match`. You can also paste a **URL** to find saved links
   most like that page (this uses pure meaning-similarity).
-- Use the slider to choose how many results to show (defaults to 5).
+- The five best matches show first. **Show More Results** at the bottom of the
+  list reveals five more each time you click it, up to 25.
 
 **Exact text**
 - Finds **every** entry that contains your words (case-insensitive) anywhere in
   the title, summary, notes, keywords, or URL — handy for names or specific
-  terms, e.g. *Jones*, even when buried in a summary.
+  terms, e.g. *Jones*, even when buried in a summary. The count above the list is
+  the full total; **Show More Results** walks through them five at a time, with
+  no 25-result ceiling.
 - **Multiple words are AND-ed:** each word must appear somewhere in the entry,
   but in any order and not necessarily next to each other — so `weather climate`
   finds entries that mention both *weather* and *climate*.

@@ -54,11 +54,14 @@ Pick a mode with the **Search by** toggle:
   local embedding model, so related pages surface even when they don't share your
   exact words. Entries whose **keywords** match your term jump to the top
   (`🏷 keyword match`). You can also paste a **URL** to find saved links most like
-  that page. The slider sets how many results to show.
+  that page. The five best matches show first; **Show More Results** at the
+  bottom of the list reveals five more each time you click it, up to 25.
 - **Exact text** — finds **every** entry that contains your words
   (case-insensitive) anywhere in the title, summary, notes, keywords, or URL.
   Best for names or specific terms — e.g. searching *Jones* finds it even when
-  it's buried in a summary and isn't one of the keywords.
+  it's buried in a summary and isn't one of the keywords. The count above the
+  list is the full total; **Show More Results** walks through them five at a
+  time, however many there are.
 
   **Multiple words must all appear**, but they can be anywhere in the entry and
   in any order — so `weather climate` finds entries that mention both *weather* and

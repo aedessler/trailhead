@@ -19,6 +19,14 @@ import core
 # the tags you use most — clicking a chip adds that word to the Keywords field.
 SUGGESTED_KEYWORDS = ["climate", "satellites", "methods", "policy", "data", "modeling"]
 
+# Search results appear a page at a time: the first SEARCH_PAGE_SIZE, then
+# another page for each click of "Show More Results". A Meaning search scores
+# every entry in the library, so MAX_MEANING_RESULTS caps how deep it reaches —
+# past that the similarity scores are mostly noise. (Exact text has a real
+# cutoff of its own: an entry either contains the words or it doesn't.)
+SEARCH_PAGE_SIZE = 5
+MAX_MEANING_RESULTS = 25
+
 # The Help tab renders this Markdown file. It lives next to app.py so you can edit
 # the documentation without touching the code; changes show on the next rerun.
 HELP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HELP.md")
@@ -513,6 +521,7 @@ def _open_related_entry(entry_id: int, view: str, parent_id: int) -> bool:
             st.session_state["search_nav_history"] = history
         st.session_state["search_results"] = [entry]
         st.session_state["search_was_exact"] = False
+        st.session_state["search_shown"] = SEARCH_PAGE_SIZE
         return True
 
     # In Browse, preserve the parent as an intermediate stop when the click came
@@ -969,14 +978,6 @@ with search_tab:
         )
         search_clicked = st.form_submit_button("Search", type="primary")
 
-    top_k = st.slider(
-        "How many results?",
-        min_value=1,
-        max_value=25,
-        value=5,
-        help="Only applies to Meaning search; Exact text shows every match.",
-    )
-
     if search_clicked:
         # A new explicit search starts a fresh navigation trail. Related-link
         # clicks below build their own history from these new results.
@@ -991,7 +992,9 @@ with search_tab:
                     if exact:
                         results = core.text_search(query.strip())
                     else:
-                        results = core.search(query.strip(), top_k=top_k)
+                        results = core.search(
+                            query.strip(), top_k=MAX_MEANING_RESULTS
+                        )
             except Exception as exc:
                 st.error(f"Search failed: {exc}")
                 results = []
@@ -1000,6 +1003,8 @@ with search_tab:
             # re-submitted on those reruns) and the edit form never renders.
             st.session_state["search_results"] = results
             st.session_state["search_was_exact"] = exact
+            # A new search starts back at the first page of results.
+            st.session_state["search_shown"] = SEARCH_PAGE_SIZE
 
     results = st.session_state.get("search_results")
     if results is not None:
@@ -1014,6 +1019,7 @@ with search_tab:
                 previous = history.pop()
                 st.session_state["search_results"] = previous["results"]
                 st.session_state["search_was_exact"] = previous["was_exact"]
+                st.session_state["search_shown"] = SEARCH_PAGE_SIZE
                 if history:
                     st.session_state["search_nav_history"] = history
                 else:
@@ -1029,7 +1035,12 @@ with search_tab:
                 st.info("No matches yet — add some links first.")
         elif exact:
             st.caption(f"Found {len(results)} matching link(s).")
-        for r in results:
+
+        # Only the first `shown` results are drawn; the button below reveals the
+        # next page. Kept in session state so it survives the reruns that Edit,
+        # Delete and Map trigger.
+        shown = st.session_state.get("search_shown", SEARCH_PAGE_SIZE)
+        for r in results[:shown]:
                 rid = r["id"]
                 # Separate key prefix ("sedit") so a result here doesn't share
                 # edit state with the same entry shown in the Browse tab.
@@ -1121,6 +1132,11 @@ with search_tab:
                             _render_map(rid)
 
                         _render_related_links(rid, "search")
+
+        if shown < len(results):
+            if st.button("Show More Results", key="search_show_more"):
+                st.session_state["search_shown"] = shown + SEARCH_PAGE_SIZE
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------

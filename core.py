@@ -45,7 +45,7 @@ load_dotenv(override=True)
 # Bump the minor part for new features and fixes, the major part for a release
 # big enough that you'd tell someone about it. Tag each release in git to match
 # (`git tag -a v2.0`), so an old version stays downloadable.
-__version__ = "2.1.2"
+__version__ = "2.2"
 
 # Which LLM provider to use for summaries: "openai", "tamu", or "none".
 # "none" skips all LLM calls (summary/title/keywords come back empty for you to
