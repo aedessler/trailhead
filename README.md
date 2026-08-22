@@ -1,6 +1,6 @@
 # 🧭 Trailhead
 
-**Version 2.1.2**
+**Version 2.2.1**
 
 Trailhead is a personal Mac app for building a searchable library of web
 links. You **add a link**, the app fetches the page and has an LLM summarize it,
@@ -115,6 +115,10 @@ picks how matching works:
   *women*. Wildcards apply per word, so `clim* polic*` requires both a *clim…*
   and a *polic…* word. A literal `%` or `_` is treated as plain text.
 
+Every result shows its **source address** in small grey type directly under
+the title, so you can see where an entry came from without clicking it. The
+address is clickable and goes to the same page as the title.
+
 Each result lists up to **5 🔗 Related links** — the entries most similar in
 meaning to that result, with a similarity score. Click one to open that saved
 entry **inside Trailhead**, where you can follow its related links in turn; a
@@ -124,6 +128,8 @@ interactive graph of the result's neighborhood (see below).
 
 ### 📚 Browse all
 - Every saved link appears as a compact, collapsible row (click to expand).
+- Expanding a row shows the entry's **source address** in small grey type
+  first; click it to open the original page.
 - Each expanded entry also lists up to **5 🔗 Related links** — the most
   semantically similar entries in your library, each with a similarity score.
   Clicking one opens that saved entry inside Trailhead instead of opening its

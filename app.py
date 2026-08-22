@@ -9,6 +9,7 @@ All the real work lives in core.py; this file is only the screen layout.
 
 import json
 import os
+import re
 from datetime import date
 
 import streamlit as st
@@ -535,6 +536,22 @@ def _open_related_entry(entry_id: int, view: str, parent_id: int) -> bool:
     st.session_state["browse_nav_history"] = history
     st.session_state["browse_focus_id"] = entry_id
     return True
+
+
+def _render_url_caption(url: str) -> None:
+    """Show the entry's source address as a small grey line under its title."""
+    # Images saved without a source link have no URL; drawing an empty caption
+    # would leave a stray blank line, so skip it entirely.
+    if not url:
+        return
+    # Saved URLs are arbitrary text, so neither half of the markdown link can be
+    # trusted raw. Wrap the destination in <> so a URL containing parentheses
+    # (Wikipedia, mostly) doesn't end the link early, percent-encoding the only
+    # two characters that <> itself can't carry, and escape the markdown-active
+    # characters in the visible text so an underscore doesn't start italics.
+    dest = url.replace("<", "%3C").replace(">", "%3E")
+    shown = re.sub(r"([\\`*_\[\]])", r"\\\1", url)
+    st.caption(f"[{shown}](<{dest}>)")
 
 
 def _render_related_links(entry_id: int, view: str) -> None:
@@ -1101,6 +1118,7 @@ with search_tab:
                             st.markdown(f"**[{r['title']}]({r['url']})**")
                         else:
                             st.markdown(f"**{r['title']}**")
+                        _render_url_caption(r["url"])
                         _render_entry_image(r, "search")
                         if "score" in r:
                             if r.get("keyword_match"):
@@ -1235,8 +1253,7 @@ with browse_tab:
                     st.rerun()
             else:
                 # --- Read-only view ---
-                if e["url"]:
-                    st.markdown(f"[Open link ↗]({e['url']})")
+                _render_url_caption(e["url"])
                 _render_entry_image(e, "browse")
                 st.write(e["summary"])
                 if e["keywords"]:
